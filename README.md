@@ -10,6 +10,12 @@
 </p>
 
 <p align="center">
+  <a href="https://vulnradar.lovable.app" target="_blank">
+    🌐 Live Demo
+  </a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" />
   <img src="https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white" />
@@ -49,22 +55,22 @@
 
 ## 🏗️ Architecture
 
-```
+```text
 ┌─────────────────────────────────────┐
 │           React Frontend            │
 │  (Vite + TypeScript + Tailwind)     │
 ├─────────────────────────────────────┤
 │         Scanner API Client          │
 │   Sequential phase orchestration    │
-│   ┌───────┐ ┌────────┐ ┌────────┐  │
-│   │ Recon │→│ Active │→│ Attack │  │
-│   └───────┘ └────────┘ └────────┘  │
+│   ┌───────┐ ┌────────┐ ┌────────┐   │
+│   │ Recon │→│ Active │→│ Attack │   │
+│   └───────┘ └────────┘ └────────┘   │
 ├─────────────────────────────────────┤
 │      Supabase Edge Functions        │
 │  scan-target  │  ai-analyze         │
 ├─────────────────────────────────────┤
 │     External APIs & Services        │
-│  DNS-over-HTTPS │ crt.sh │ Gemini  │
+│  DNS-over-HTTPS │ crt.sh │ Gemini   │
 └─────────────────────────────────────┘
 ```
 
@@ -123,7 +129,7 @@ supabase functions deploy ai-analyze
 
 ## 📁 Project Structure
 
-```
+```text
 src/
 ├── components/          # UI components
 │   ├── AiAnalysis.tsx   # AI-powered executive summary
