@@ -11,7 +11,7 @@ function generateVulnerabilities(data: {
   openPorts: { port: number; service: string }[];
   injectionFindings: InjectionFinding[];
   corsFindings: CorsFinding[];
-  openRedirectFindings: any[];
+  openRedirectFindings: OpenRedirectFinding[];
 }, domain: string): Vulnerability[] {
   const vulns: Vulnerability[] = [];
   let vulnId = 1;
