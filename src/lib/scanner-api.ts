@@ -224,7 +224,7 @@ export async function performRealScan(
   let openPorts: any[] = [];
   let crawlStats = { pagesDiscovered: 0, paramsFound: 0, formsFound: 0 };
   let crawlData: any = null;
-  let injectionFindings: any[] = [];
+  let injectionFindings: InjectionFinding[] = [];
   let corsFindings: any[] = [];
   let openRedirectFindings: any[] = [];
 
