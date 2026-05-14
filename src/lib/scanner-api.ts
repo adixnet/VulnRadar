@@ -10,7 +10,7 @@ function generateVulnerabilities(data: {
   redirectChain: { url: string; status: number }[];
   openPorts: { port: number; service: string }[];
   injectionFindings: InjectionFinding[];
-  corsFindings: any[];
+  corsFindings: CorsFinding[];
   openRedirectFindings: any[];
 }, domain: string): Vulnerability[] {
   const vulns: Vulnerability[] = [];
