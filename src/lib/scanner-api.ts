@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import type { ScanResult, Vulnerability, InjectionFinding, CorsFinding } from '@/lib/scanner-data';
+import type { ScanResult, Vulnerability, InjectionFinding, CorsFinding, OpenRedirectFinding } from '@/lib/scanner-data';
 
 // Client-side vulnerability generation from merged phase data
 function generateVulnerabilities(data: {
