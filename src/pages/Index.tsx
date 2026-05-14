@@ -99,7 +99,7 @@ const Index = () => {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container max-w-6xl mx-auto flex items-center justify-between h-14 px-4">
+        <div className="container max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between min-h-14 sm:h-14 px-4 py-2 sm:py-0 gap-2 sm:gap-0">
           <div className="flex items-center gap-2">
             <img src={vulnRadarLogo} alt="VulnRadar" className="w-6 h-6 sm:w-7 sm:h-7" />
             <span className="font-bold text-base sm:text-lg text-foreground tracking-tight">
@@ -216,10 +216,10 @@ const Index = () => {
               <div className="inline-flex items-center gap-2 text-xs font-mono text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-full">
                 <Zap className="w-3 h-3" /> REAL-TIME SECURITY SCANNER
               </div>
-              <h1 className="text-3xl sm:text-4xl md:text-6xl font-bold text-foreground tracking-tight">
+              <h1 className="text-2xl sm:text-4xl md:text-6xl lg:text-7xl font-bold text-foreground tracking-tight">
                 Vuln<span className="text-primary">Radar</span>
               </h1>
-              <p className="text-sm sm:text-base text-muted-foreground max-w-md mx-auto">
+              <p className="text-sm sm:text-base text-muted-foreground max-w-xs sm:max-w-md mx-auto">
                 Production-grade vulnerability scanner — DNS, HTTP headers, SSL/TLS, subdomain enumeration, sensitive file detection, port probing, SQLi/XSS testing, and Certificate Transparency analysis.
               </p>
             </div>
@@ -251,7 +251,7 @@ const Index = () => {
               </Button>
             </div>
 
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-4 sm:gap-6 mt-6 sm:mt-8 text-center max-w-2xl w-full">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 sm:gap-6 mt-6 sm:mt-8 text-center max-w-2xl w-full">
               <div>
                 <div className="text-xl sm:text-2xl font-bold font-mono text-foreground">DNS</div>
                 <div className="text-xs text-muted-foreground">Real Records</div>
