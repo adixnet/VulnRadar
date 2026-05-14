@@ -226,7 +226,7 @@ export async function performRealScan(
   let crawlData: any = null;
   let injectionFindings: InjectionFinding[] = [];
   let corsFindings: CorsFinding[] = [];
-  let openRedirectFindings: any[] = [];
+  let openRedirectFindings: OpenRedirectFinding[] = [];
 
   // ═══ PHASE 1: RECON ═══
   onLog('═══════════════════════════════════════');
