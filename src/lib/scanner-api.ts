@@ -9,7 +9,7 @@ function generateVulnerabilities(data: {
   sensitiveFiles: { path: string; name: string; status: number; severity: string }[];
   redirectChain: { url: string; status: number }[];
   openPorts: { port: number; service: string }[];
-  injectionFindings: any[];
+  injectionFindings: InjectionFinding[];
   corsFindings: any[];
   openRedirectFindings: any[];
 }, domain: string): Vulnerability[] {
