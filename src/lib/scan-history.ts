@@ -19,7 +19,8 @@ export async function saveScan(result: ScanResult): Promise<StoredScan> {
   };
 
   try {
-    const { error } = await supabase.from('scan_history' as any).insert([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from as any)('scan_history').insert([
       {
         id: entry.id,
         target: result.target,
@@ -43,8 +44,8 @@ export async function saveScan(result: ScanResult): Promise<StoredScan> {
 
 export async function getHistory(): Promise<StoredScan[]> {
   try {
-    const { data, error } = await supabase
-      .from('scan_history' as any)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.from as any)('scan_history')
       .select('*')
       .order('timestamp', { ascending: false })
       .limit(20);
@@ -54,6 +55,29 @@ export async function getHistory(): Promise<StoredScan[]> {
       return getFromLocalStorage();
     }
 
+    // Migration logic: If Supabase is empty but local storage has data, migrate it!
+    if (data.length === 0) {
+      const localHistory = getFromLocalStorage();
+      if (localHistory.length > 0) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (supabase.from as any)('scan_history').insert(
+            localHistory.map(entry => ({
+              id: entry.id,
+              target: entry.result.target,
+              result: entry.result,
+              timestamp: entry.timestamp,
+            }))
+          );
+          return localHistory;
+        } catch (e) {
+          console.error('Migration failed:', e);
+          return localHistory;
+        }
+      }
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return data.map((row: any) => ({
       id: row.id,
       timestamp: row.timestamp,
@@ -71,8 +95,8 @@ export async function getHistory(): Promise<StoredScan[]> {
 
 export async function clearHistory(): Promise<void> {
   try {
-    const { error } = await supabase
-      .from('scan_history' as any)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from as any)('scan_history')
       .delete()
       .neq('id', '0'); // Delete all rows
       
