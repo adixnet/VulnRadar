@@ -1,7 +1,5 @@
 import type { ScanResult } from './scanner-data';
-
-const STORAGE_KEY = 'vulnradar_history';
-const MAX_HISTORY = 20;
+import { supabase } from '@/integrations/supabase/client';
 
 export interface StoredScan {
   id: string;
@@ -9,8 +7,7 @@ export interface StoredScan {
   timestamp: string;
 }
 
-export function saveScan(result: ScanResult): StoredScan {
-  const history = getHistory();
+export async function saveScan(result: ScanResult): Promise<StoredScan> {
   const entry: StoredScan = {
     id: `scan-${Date.now()}`,
     result: {
@@ -20,15 +17,87 @@ export function saveScan(result: ScanResult): StoredScan {
     },
     timestamp: new Date().toISOString(),
   };
-  history.unshift(entry);
-  if (history.length > MAX_HISTORY) history.pop();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+
+  try {
+    const { error } = await supabase.from('scan_history' as any).insert([
+      {
+        id: entry.id,
+        target: result.target,
+        result: entry.result,
+        timestamp: entry.timestamp,
+      }
+    ]);
+    
+    if (error) {
+      console.error('Failed to save to Supabase:', error);
+      // Fallback to local storage if DB is not configured yet
+      saveToLocalStorage(entry);
+    }
+  } catch (err) {
+    console.error('Error saving scan:', err);
+    saveToLocalStorage(entry);
+  }
+
   return entry;
 }
 
-export function getHistory(): StoredScan[] {
+export async function getHistory(): Promise<StoredScan[]> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const { data, error } = await supabase
+      .from('scan_history' as any)
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .limit(20);
+
+    if (error || !data) {
+      console.error('Failed to get history from Supabase:', error);
+      return getFromLocalStorage();
+    }
+
+    return data.map((row: any) => ({
+      id: row.id,
+      timestamp: row.timestamp,
+      result: {
+        ...row.result,
+        startTime: new Date(row.result.startTime),
+        endTime: row.result.endTime ? new Date(row.result.endTime) : undefined,
+      }
+    }));
+  } catch (err) {
+    console.error('Error fetching history:', err);
+    return getFromLocalStorage();
+  }
+}
+
+export async function clearHistory(): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('scan_history' as any)
+      .delete()
+      .neq('id', '0'); // Delete all rows
+      
+    if (error) {
+      console.error('Failed to clear history from Supabase:', error);
+    }
+    // Always clear fallback too
+    localStorage.removeItem('vulnradar_history');
+  } catch (err) {
+    console.error('Error clearing history:', err);
+    localStorage.removeItem('vulnradar_history');
+  }
+}
+
+// Fallback mechanisms for when Supabase table isn't created yet
+function saveToLocalStorage(entry: StoredScan) {
+  const history = getFromLocalStorage();
+  history.unshift(entry);
+  if (history.length > 20) history.pop();
+  localStorage.setItem('vulnradar_history', JSON.stringify(history));
+}
+
+function getFromLocalStorage(): StoredScan[] {
+  try {
+    const raw = localStorage.getItem('vulnradar_history');
     if (!raw) return [];
     const parsed = JSON.parse(raw) as StoredScan[];
     return parsed.map(s => ({
@@ -42,8 +111,4 @@ export function getHistory(): StoredScan[] {
   } catch {
     return [];
   }
-}
-
-export function clearHistory() {
-  localStorage.removeItem(STORAGE_KEY);
 }
