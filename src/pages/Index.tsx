@@ -251,7 +251,8 @@ const Index = () => {
               </Button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 sm:gap-6 mt-6 sm:mt-8 text-center max-w-2xl w-full">
+            +<div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 sm:gap-6 mt-6 sm:mt-8 text-center max-w-2xl w-full">
+
               <div>
                 <div className="text-xl sm:text-2xl font-bold font-mono text-foreground">DNS</div>
                 <div className="text-xs text-muted-foreground">Real Records</div>
