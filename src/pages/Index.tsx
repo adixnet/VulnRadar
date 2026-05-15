@@ -60,7 +60,7 @@ const Index = () => {
 
       setResult(scanResult);
       setScanState('complete');
-      saveScan(scanResult);
+      await saveScan(scanResult);
       toast({ title: 'Scan Complete', description: `Found ${scanResult.vulnerabilities.length} findings for ${target}` });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Scan failed';
@@ -70,8 +70,8 @@ const Index = () => {
     }
   }, [target, addLog, toast]);
 
-  const openHistory = () => {
-    setHistory(getHistory());
+  const openHistory = async () => {
+    setHistory(await getHistory());
     setShowHistory(true);
     setCompareMode(false);
     setCompareScans([null, null]);
@@ -146,7 +146,7 @@ const Index = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => { clearHistory(); setHistory([]); toast({ title: 'History cleared' }); }}
+                  onClick={async () => { await clearHistory(); setHistory([]); toast({ title: 'History cleared' }); }}
                   className="gap-1.5 text-xs"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Clear
