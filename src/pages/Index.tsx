@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
-import { Terminal, Crosshair, Zap, Radio, History, ArrowLeftRight, Trash2 } from 'lucide-react';
+import { Terminal, Crosshair, Zap, Radio, History, ArrowLeftRight, Trash2, Download, FileJson, FileSpreadsheet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import TerminalOutput from '@/components/TerminalOutput';
 import ScanProgress from '@/components/ScanProgress';
@@ -11,6 +12,7 @@ import { type ScanResult, SCAN_PHASES } from '@/lib/scanner-data';
 import { performRealScan } from '@/lib/scanner-api';
 import { saveScan, getHistory, clearHistory, type StoredScan } from '@/lib/scan-history';
 import { useToast } from '@/hooks/use-toast';
+import { exportToCsv, exportToJson } from '@/lib/export-utils';
 import vulnRadarLogo from '@/assets/vulnradar-logo.png';
 
 type ScanState = 'idle' | 'scanning' | 'complete' | 'error';
@@ -178,21 +180,40 @@ const Index = () => {
                   const critCount = scan.result.vulnerabilities.filter(v => v.severity === 'critical').length;
                   const totalVulns = scan.result.vulnerabilities.length;
                   return (
-                    <button
-                      key={scan.id}
-                      onClick={() => compareMode ? selectForCompare(scan) : loadScan(scan)}
-                      className="text-left p-4 rounded-md border border-border bg-card hover:border-primary/50 hover:bg-secondary/50 transition-all"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-mono text-primary truncate">{scan.result.target}</span>
-                        <span className="text-[10px] text-muted-foreground">{new Date(scan.timestamp).toLocaleDateString()}</span>
+                    <div className="group relative">
+                      <button
+                        onClick={() => compareMode ? selectForCompare(scan) : loadScan(scan)}
+                        className="w-full text-left p-4 rounded-md border border-border bg-card hover:border-primary/50 hover:bg-secondary/50 transition-all"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-mono text-primary truncate mr-8">{scan.result.target}</span>
+                          <span className="text-[10px] text-muted-foreground shrink-0">{new Date(scan.timestamp).toLocaleDateString()}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs font-mono">
+                          <span className="text-foreground">{totalVulns} vulns</span>
+                          {critCount > 0 && <span className="text-severity-critical">{critCount} crit</span>}
+                          <span className="text-muted-foreground">SSL: {scan.result.sslInfo.grade}</span>
+                        </div>
+                      </button>
+                      
+                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full bg-background/80 backdrop-blur-sm border border-border">
+                              <Download className="h-3.5 w-3.5 text-muted-foreground" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => exportToJson(scan.result)} className="gap-2 cursor-pointer">
+                              <FileJson className="w-3.5 h-3.5" /> Export JSON
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => exportToCsv(scan.result)} className="gap-2 cursor-pointer">
+                              <FileSpreadsheet className="w-3.5 h-3.5" /> Export CSV
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
-                      <div className="flex items-center gap-3 text-xs font-mono">
-                        <span className="text-foreground">{totalVulns} vulns</span>
-                        {critCount > 0 && <span className="text-severity-critical">{critCount} crit</span>}
-                        <span className="text-muted-foreground">SSL: {scan.result.sslInfo.grade}</span>
-                      </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
