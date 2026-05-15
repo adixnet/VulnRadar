@@ -2,11 +2,10 @@ import { ScanResult } from '@/lib/scanner-data';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import VulnerabilityCard from './VulnerabilityCard';
 import AiAnalysis from './AiAnalysis';
-import { Shield, Globe, Lock, Server, Cpu, Network, FileWarning, ArrowRight, Search, Plug, Code, Unlink, ExternalLink, Brain, Download, FileJson, FileText } from 'lucide-react';
+import { Shield, Globe, Lock, Server, Cpu, Network, FileWarning, ArrowRight, Search, Plug, Code, Unlink, ExternalLink, Brain, Download, FileJson, FileText, FileSpreadsheet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { exportToJson, exportToCsv, exportToPdf } from '@/lib/export-utils';
 
 interface ScanReportProps {
   result: ScanResult;
@@ -21,36 +20,6 @@ const ScanReport = ({ result }: ScanReportProps) => {
   const riskScore = Math.min(100, critCount * 25 + highCount * 15 + medCount * 8 + lowCount * 3);
   const riskColor = riskScore >= 70 ? 'text-severity-critical' : riskScore >= 40 ? 'text-severity-medium' : 'text-success';
 
-  const exportToJson = () => {
-    const dataStr = JSON.stringify(result, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `vulnradar-report-${result.target.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const exportToPdf = async () => {
-    const element = document.getElementById('scan-report-container');
-    if (!element) return;
-    
-    try {
-      const canvas = await html2canvas(element, { scale: 2 });
-      const imgData = canvas.toDataURL('image/jpeg', 1.0);
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`vulnradar-report-${result.target.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`);
-    } catch (error) {
-      console.error('Failed to export PDF:', error);
-    }
-  };
 
   return (
     <div className="space-y-6" id="scan-report-container">
@@ -64,11 +33,14 @@ const ScanReport = ({ result }: ScanReportProps) => {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={exportToPdf} className="gap-2 cursor-pointer">
+            <DropdownMenuItem onClick={() => exportToPdf(result, 'scan-report-container')} className="gap-2 cursor-pointer">
               <FileText className="w-4 h-4" /> Export as PDF
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={exportToJson} className="gap-2 cursor-pointer">
+            <DropdownMenuItem onClick={() => exportToJson(result)} className="gap-2 cursor-pointer">
               <FileJson className="w-4 h-4" /> Export as JSON
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportToCsv(result)} className="gap-2 cursor-pointer">
+              <FileSpreadsheet className="w-4 h-4" /> Export as CSV
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
