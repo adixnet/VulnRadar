@@ -2,7 +2,10 @@ import { ScanResult } from '@/lib/scanner-data';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import VulnerabilityCard from './VulnerabilityCard';
 import AiAnalysis from './AiAnalysis';
-import { Shield, Globe, Lock, Server, Cpu, Network, FileWarning, ArrowRight, Search, Plug, Code, Unlink, ExternalLink, Brain } from 'lucide-react';
+import { Shield, Globe, Lock, Server, Cpu, Network, FileWarning, ArrowRight, Search, Plug, Code, Unlink, ExternalLink, Brain, Download, FileJson, FileText, FileSpreadsheet, FileCode, File } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { exportToJson, exportToCsv, exportToPdf, exportToMarkdown, exportToXml } from '@/lib/export-utils';
 
 interface ScanReportProps {
   result: ScanResult;
@@ -17,8 +20,38 @@ const ScanReport = ({ result }: ScanReportProps) => {
   const riskScore = Math.min(100, critCount * 25 + highCount * 15 + medCount * 8 + lowCount * 3);
   const riskColor = riskScore >= 70 ? 'text-severity-critical' : riskScore >= 40 ? 'text-severity-medium' : 'text-success';
 
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" id="scan-report-container">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold tracking-tight">Scan Summary</h2>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-2">
+              <Download className="w-4 h-4" />
+              Export Report
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => exportToPdf(result, 'scan-report-container')} className="gap-2 cursor-pointer">
+              <FileText className="w-4 h-4" /> Export as PDF
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportToJson(result)} className="gap-2 cursor-pointer">
+              <FileJson className="w-4 h-4" /> Export as JSON
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportToCsv(result)} className="gap-2 cursor-pointer">
+              <FileSpreadsheet className="w-4 h-4" /> Export as CSV
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportToMarkdown(result)} className="gap-2 cursor-pointer">
+              <File className="w-4 h-4" /> Export as Markdown
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportToXml(result)} className="gap-2 cursor-pointer">
+              <FileCode className="w-4 h-4" /> Export as XML
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
         <div className="rounded-md border border-border bg-card p-3 sm:p-4 text-center">

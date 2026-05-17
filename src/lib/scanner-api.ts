@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import type { ScanResult, Vulnerability } from '@/lib/scanner-data';
+import type { ScanResult, Vulnerability, InjectionFinding, CorsFinding, OpenRedirectFinding } from '@/lib/scanner-data';
 
 // Client-side vulnerability generation from merged phase data
 function generateVulnerabilities(data: {
@@ -9,9 +9,9 @@ function generateVulnerabilities(data: {
   sensitiveFiles: { path: string; name: string; status: number; severity: string }[];
   redirectChain: { url: string; status: number }[];
   openPorts: { port: number; service: string }[];
-  injectionFindings: any[];
-  corsFindings: any[];
-  openRedirectFindings: any[];
+  injectionFindings: InjectionFinding[];
+  corsFindings: CorsFinding[];
+  openRedirectFindings: OpenRedirectFinding[];
 }, domain: string): Vulnerability[] {
   const vulns: Vulnerability[] = [];
   let vulnId = 1;
@@ -287,9 +287,9 @@ export async function performRealScan(
   let openPorts: any[] = [];
   let crawlStats = { pagesDiscovered: 0, paramsFound: 0, formsFound: 0 };
   let crawlData: any = null;
-  let injectionFindings: any[] = [];
-  let corsFindings: any[] = [];
-  let openRedirectFindings: any[] = [];
+  let injectionFindings: InjectionFinding[] = [];
+  let corsFindings: CorsFinding[] = [];
+  let openRedirectFindings: OpenRedirectFinding[] = [];
 
   try {
     // ═══ PHASE 1: RECON ═══
