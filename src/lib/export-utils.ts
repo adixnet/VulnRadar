@@ -77,3 +77,81 @@ export const exportToPdf = async (result: ScanResult, elementId: string) => {
     console.error('Failed to export PDF:', error);
   }
 };
+
+export const exportToMarkdown = (result: ScanResult) => {
+  const mdContent = [
+    `# VulnRadar Scan Report: ${result.target}`,
+    `**Scan Time**: ${result.startTime.toLocaleString()}`,
+    `**SSL Grade**: ${result.sslInfo.grade}`,
+    ``,
+    `## Vulnerabilities (${result.vulnerabilities.length})`,
+    ...result.vulnerabilities.map(v => [
+      `### ${v.title}`,
+      `- **Severity**: ${v.severity}`,
+      `- **CVSS**: ${v.cvss}`,
+      `- **Category**: ${v.category}`,
+      `- **CWE**: ${v.cwe}`,
+      ``,
+      `**Description**: ${v.description}`,
+      ``,
+      `**Impact**: ${v.impact}`,
+      ``,
+      `**Remediation**: ${v.remediation}`,
+      `---`
+    ].join('\n')),
+  ].join('\n');
+
+  const blob = new Blob([mdContent], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `vulnradar-report-${result.target.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+export const exportToXml = (result: ScanResult) => {
+  const escapeXml = (unsafe: string) => {
+    return unsafe.replace(/[<>&'"]/g, (c) => {
+      switch (c) {
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '&': return '&amp;';
+        case '\'': return '&apos;';
+        case '"': return '&quot;';
+        default: return c;
+      }
+    });
+  };
+
+  const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<scanReport>
+  <target>${escapeXml(result.target)}</target>
+  <startTime>${result.startTime.toISOString()}</startTime>
+  <sslGrade>${escapeXml(result.sslInfo.grade)}</sslGrade>
+  <vulnerabilities>
+${result.vulnerabilities.map(v => `    <vulnerability>
+      <title>${escapeXml(v.title)}</title>
+      <severity>${escapeXml(v.severity)}</severity>
+      <cvss>${v.cvss}</cvss>
+      <category>${escapeXml(v.category)}</category>
+      <cwe>${escapeXml(v.cwe || '')}</cwe>
+      <description>${escapeXml(v.description)}</description>
+      <impact>${escapeXml(v.impact)}</impact>
+      <remediation>${escapeXml(v.remediation)}</remediation>
+    </vulnerability>`).join('\n')}
+  </vulnerabilities>
+</scanReport>`;
+
+  const blob = new Blob([xmlContent], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `vulnradar-report-${result.target.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.xml`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
