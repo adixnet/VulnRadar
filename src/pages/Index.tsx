@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { Terminal, Crosshair, Zap, Radio, History, ArrowLeftRight, Trash2, Download, FileJson, FileSpreadsheet } from 'lucide-react';
+import { Terminal, Crosshair, Zap, Radio, History, ArrowLeftRight, Trash2, Download, FileJson, FileSpreadsheet, FileCode, File, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
@@ -12,7 +12,7 @@ import { type ScanResult, SCAN_PHASES } from '@/lib/scanner-data';
 import { performRealScan } from '@/lib/scanner-api';
 import { saveScan, getHistory, clearHistory, type StoredScan } from '@/lib/scan-history';
 import { useToast } from '@/hooks/use-toast';
-import { exportToCsv, exportToJson } from '@/lib/export-utils';
+import { exportToCsv, exportToJson, exportToMarkdown, exportToXml, exportToPdf } from '@/lib/export-utils';
 import vulnRadarLogo from '@/assets/vulnradar-logo.png';
 
 type ScanState = 'idle' | 'scanning' | 'complete' | 'error';
@@ -204,11 +204,20 @@ const Index = () => {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => exportToPdf(scan.result, 'scan-report-container')} className="gap-2 cursor-pointer">
+                              <FileText className="w-3.5 h-3.5" /> Export PDF
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => exportToJson(scan.result)} className="gap-2 cursor-pointer">
                               <FileJson className="w-3.5 h-3.5" /> Export JSON
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => exportToCsv(scan.result)} className="gap-2 cursor-pointer">
                               <FileSpreadsheet className="w-3.5 h-3.5" /> Export CSV
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => exportToMarkdown(scan.result)} className="gap-2 cursor-pointer">
+                              <File className="w-3.5 h-3.5" /> Export Markdown
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => exportToXml(scan.result)} className="gap-2 cursor-pointer">
+                              <FileCode className="w-3.5 h-3.5" /> Export XML
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
