@@ -1,14 +1,31 @@
 import { supabase } from '@/integrations/supabase/client';
-import type { ScanResult, Vulnerability, InjectionFinding, CorsFinding, OpenRedirectFinding } from '@/lib/scanner-data';
+import type { ScanResult, Vulnerability } from '@/lib/scanner-data';
+import type {
+  CrawlData,
+  DNSRecord,
+  SecurityHeader,
+  Technology,
+  RedirectChainEntry,
+  ExposedFile,
+  OpenPort,
+  SSLInfo,
+  ScanResponse,
+  ReconData,
+  ActiveData,
+  AttackData,
+  InjectionFinding,
+  CorsFinding,
+  OpenRedirectFinding
+} from '../../supabase/functions/scan-target/types/scan';
 
 // Client-side vulnerability generation from merged phase data
 function generateVulnerabilities(data: {
-  headers: { name: string; value: string; status: string }[];
-  dnsRecords: { type: string; value: string }[];
+  headers: SecurityHeader[];
+  dnsRecords: DNSRecord[];
   sslInfo: { grade: string; issues: string[] };
-  sensitiveFiles: { path: string; name: string; status: number; severity: string }[];
-  redirectChain: { url: string; status: number }[];
-  openPorts: { port: number; service: string }[];
+  sensitiveFiles: ExposedFile[];
+  redirectChain: RedirectChainEntry[];
+  openPorts: OpenPort[];
   injectionFindings: InjectionFinding[];
   corsFindings: CorsFinding[];
   openRedirectFindings: OpenRedirectFinding[];
@@ -277,16 +294,16 @@ export async function performRealScan(
   }
 
   // Accumulated results across phases
-  let dnsRecords: any[] = [];
+  let dnsRecords: DNSRecord[] = [];
   let subdomains: string[] = [];
-  let headers: any[] = [];
-  let technologies: any[] = [];
-  let redirectChain: any[] = [];
-  let sensitiveFiles: any[] = [];
-  let sslInfo = { grade: 'N/A', expiry: 'N/A', protocol: 'N/A', cipher: 'N/A', issues: [] as string[] };
-  let openPorts: any[] = [];
+  let headers: SecurityHeader[] = [];
+  let technologies: Technology[] = [];
+  let redirectChain: RedirectChainEntry[] = [];
+  let sensitiveFiles: ExposedFile[] = [];
+  let sslInfo: SSLInfo = { grade: 'N/A', expiry: 'N/A', protocol: 'N/A', cipher: 'N/A', issues: [] };
+  let openPorts: OpenPort[] = [];
   let crawlStats = { pagesDiscovered: 0, paramsFound: 0, formsFound: 0 };
-  let crawlData: any = null;
+  let crawlData: CrawlData | null = null;
   let injectionFindings: InjectionFinding[] = [];
   let corsFindings: CorsFinding[] = [];
   let openRedirectFindings: OpenRedirectFinding[] = [];
@@ -300,7 +317,7 @@ export async function performRealScan(
 
     try {
       const { data, error } = await withTimeout(
-        supabase.functions.invoke('scan-target', {
+        supabase.functions.invoke<ScanResponse>('scan-target', {
           body: { target, phase: 'recon', scanId },
         }),
         60000,
@@ -308,9 +325,15 @@ export async function performRealScan(
       );
 
       if (error) throw new Error(error.message || 'Recon phase failed');
-      if (!data?.success) throw new Error(data?.error || 'Recon phase unsuccessful');
+      if (!data || !data.success) {
+        throw new Error((data as any)?.error || 'Recon phase unsuccessful');
+      }
 
-      const r = data.data;
+      if (data.phase !== 'recon') {
+        throw new Error('Mismatched phase response');
+      }
+
+      const r: ReconData = data.data;
       if (r.logs) {
         for (const log of r.logs) {
           if (log != null) safeOnLog(log);
@@ -346,7 +369,7 @@ export async function performRealScan(
 
     try {
       const { data, error } = await withTimeout(
-        supabase.functions.invoke('scan-target', {
+        supabase.functions.invoke<ScanResponse>('scan-target', {
           body: { target, phase: 'active', scanId },
         }),
         60000,
@@ -354,9 +377,15 @@ export async function performRealScan(
       );
 
       if (error) throw new Error(error.message || 'Active phase failed');
-      if (!data?.success) throw new Error(data?.error || 'Active phase unsuccessful');
+      if (!data || !data.success) {
+        throw new Error((data as any)?.error || 'Active phase unsuccessful');
+      }
 
-      const r = data.data;
+      if (data.phase !== 'active') {
+        throw new Error('Mismatched phase response');
+      }
+
+      const r: ActiveData = data.data;
       if (r.logs) {
         for (const log of r.logs) {
           if (log != null) safeOnLog(log);
@@ -392,7 +421,7 @@ export async function performRealScan(
 
     try {
       const { data, error } = await withTimeout(
-        supabase.functions.invoke('scan-target', {
+        supabase.functions.invoke<ScanResponse>('scan-target', {
           body: { target, phase: 'attack', crawlData, scanId },
         }),
         90000,
@@ -400,9 +429,15 @@ export async function performRealScan(
       );
 
       if (error) throw new Error(error.message || 'Attack phase failed');
-      if (!data?.success) throw new Error(data?.error || 'Attack phase unsuccessful');
+      if (!data || !data.success) {
+        throw new Error((data as any)?.error || 'Attack phase unsuccessful');
+      }
 
-      const r = data.data;
+      if (data.phase !== 'attack') {
+        throw new Error('Mismatched phase response');
+      }
+
+      const r: AttackData = data.data;
       if (r.logs) {
         for (const log of r.logs) {
           if (log != null) safeOnLog(log);
