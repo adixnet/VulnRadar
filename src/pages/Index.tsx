@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import TerminalOutput from '@/components/TerminalOutput';
 import ScanProgress from '@/components/ScanProgress';
 import ScanReport from '@/components/ScanReport';
-import ScanSkeleton from '@/components/ScanSkeleton';
 import ScanComparison from '@/components/ScanComparison';
 import { type ScanResult, SCAN_PHASES } from '@/lib/scanner-data';
 import { performRealScan } from '@/lib/scanner-api';
@@ -25,6 +24,7 @@ const Index = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const [urlError, setUrlError] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<StoredScan[]>([]);
   const [compareMode, setCompareMode] = useState(false);
@@ -37,8 +37,28 @@ const Index = () => {
     setLogs([...logsRef.current]);
   }, []);
 
+
+  const validateTarget = (value: string): boolean => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setUrlError('Please enter a domain to scan.');
+      return false;
+    }
+    if (trimmed.includes(' ')) {
+      setUrlError('Domain cannot contain spaces.');
+      return false;
+    }
+    const domainRegex = /^(https?:\/\/)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(\/.*)?$/;
+    if (!domainRegex.test(trimmed)) {
+      setUrlError('Please enter a valid domain e.g. example.com');
+      return false;
+    }
+    setUrlError('');
+    return true;
+  };
+
   const startScan = useCallback(async () => {
-    if (!target.trim()) return;
+    if (!validateTarget(target)) return;
 
     setScanState('scanning');
     setCurrentPhaseIndex(0);
@@ -71,7 +91,7 @@ const Index = () => {
 
       setResult(scanResult);
       setScanState('complete');
-      saveScan(scanResult);
+      await saveScan(scanResult);
       toast({ title: 'Scan Complete', description: `Found ${scanResult.vulnerabilities.length} findings for ${target}` });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Scan failed';
@@ -81,8 +101,9 @@ const Index = () => {
     }
   }, [target, addLog, toast]);
 
-  const openHistory = () => {
-    setHistory(getHistory());
+  const openHistory = async () => {
+    const historyData = await getHistory();
+    setHistory(historyData);
     setShowHistory(true);
     setCompareMode(false);
     setCompareScans([null, null]);
@@ -157,7 +178,11 @@ const Index = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => { clearHistory(); setHistory([]); toast({ title: 'History cleared' }); }}
+                  onClick={async () => {
+                    await clearHistory();
+                    setHistory([]);
+                    toast({ title: 'History cleared' });
+                  }}
                   className="gap-1.5 text-xs"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Clear
@@ -274,11 +299,16 @@ const Index = () => {
                 <Crosshair className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
                   value={target}
-                  onChange={e => setTarget(e.target.value)}
+                  onChange={e => { setTarget(e.target.value); setUrlError(''); }}
                   onKeyDown={e => e.key === 'Enter' && startScan()}
                   placeholder="Enter target domain (e.g., example.com)"
-                  className="pl-10 h-12 bg-secondary border-border font-mono text-sm text-foreground placeholder:text-muted-foreground transition-all duration-300 ease-in-out focus:border-primary focus:ring-2 focus:ring-primary/30 focus:shadow-lg"
-                  />
+                  className="pl-10 h-12 bg-secondary border-border font-mono text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-primary/30"
+                />
+                {urlError && (
+                  <p className="text-sm text-destructive font-mono mt-1 flex items-center gap-1">
+                    <span>⚠</span> {urlError}
+                  </p>
+                )}
               </div>
               <Button
                 onClick={startScan}
