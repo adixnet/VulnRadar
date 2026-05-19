@@ -3,6 +3,248 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+// ==================== SSRF PREVENTION UTILITIES ====================
+
+function isIPv4(ip: string): boolean {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return false;
+  return parts.every(part => {
+    const num = parseInt(part, 10);
+    return !isNaN(num) && num >= 0 && num <= 255 && String(num) === part.trim();
+  });
+}
+
+function ipToLong(ip: string): number {
+  const parts = ip.split('.').map(p => parseInt(p, 10));
+  return parts[0] * 16777216 + parts[1] * 65536 + parts[2] * 256 + parts[3];
+}
+
+const ipv4PrivateRanges = [
+  '0.0.0.0/8',
+  '10.0.0.0/8',
+  '100.64.0.0/10',
+  '127.0.0.0/8',
+  '169.254.0.0/16',
+  '172.16.0.0/12',
+  '192.0.0.0/24',
+  '192.0.2.0/24',
+  '192.88.99.0/24',
+  '192.168.0.0/16',
+  '198.18.0.0/15',
+  '198.51.100.0/24',
+  '203.0.113.0/24',
+  '224.0.0.0/4',
+  '240.0.0.0/4',
+  '255.255.255.255/32',
+];
+
+function isPrivateIPv4Long(ipLong: number): boolean {
+  for (const subnet of ipv4PrivateRanges) {
+    const [subnetIp, maskStr] = subnet.split('/');
+    const mask = parseInt(maskStr, 10);
+    const subnetLong = ipToLong(subnetIp);
+    const shift = 32 - mask;
+    if ((ipLong >>> shift) === (subnetLong >>> shift)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isPrivateIPv4(ip: string): boolean {
+  if (!isIPv4(ip)) return false;
+  return isPrivateIPv4Long(ipToLong(ip));
+}
+
+function cleanIPv6(ip: string): string {
+  ip = ip.trim().toLowerCase();
+  if (ip.startsWith('[') && ip.endsWith(']')) {
+    ip = ip.slice(1, -1);
+  }
+  return ip;
+}
+
+function isPrivateIPv6(ip: string): boolean {
+  const cleaned = cleanIPv6(ip);
+  if (cleaned === '::1' || cleaned === '::' || cleaned === '0:0:0:0:0:0:0:1' || cleaned === '0:0:0:0:0:0:0:0') {
+    return true;
+  }
+  if (cleaned.startsWith('fe8') || cleaned.startsWith('fe9') || cleaned.startsWith('fea') || cleaned.startsWith('feb')) {
+    return true;
+  }
+  if (cleaned.startsWith('fc') || cleaned.startsWith('fd')) {
+    return true;
+  }
+  if (cleaned.startsWith('fec') || cleaned.startsWith('fed') || cleaned.startsWith('fee') || cleaned.startsWith('fef')) {
+    return true;
+  }
+  if (cleaned.startsWith('::ffff:')) {
+    const ipv4Part = cleaned.substring(7);
+    if (isIPv4(ipv4Part)) {
+      return isPrivateIPv4(ipv4Part);
+    }
+    const hexParts = ipv4Part.split(':');
+    if (hexParts.length === 2) {
+      const high = parseInt(hexParts[0], 16);
+      const low = parseInt(hexParts[1], 16);
+      if (!isNaN(high) && !isNaN(low)) {
+        const ipLong = (high << 16) + low;
+        return isPrivateIPv4Long(ipLong);
+      }
+    }
+  }
+  return false;
+}
+
+async function resolveDNSHTTP(domain: string, type: 'A' | 'AAAA'): Promise<string[]> {
+  try {
+    const resp = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=${type}`);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    const ips: string[] = [];
+    if (data.Answer && data.Answer.length > 0) {
+      for (const answer of data.Answer) {
+        if (answer.type === 1 || answer.type === 28) {
+          ips.push(String(answer.data || answer.rdata || '').trim());
+        }
+      }
+    }
+    return ips;
+  } catch {
+    return [];
+  }
+}
+
+async function resolveDNSNatively(domain: string, type: 'A' | 'AAAA'): Promise<string[]> {
+  if (typeof Deno !== 'undefined' && typeof Deno.resolveDns === 'function') {
+    try {
+      return await Deno.resolveDns(domain, type);
+    } catch {
+      // ignore
+    }
+  }
+  return [];
+}
+
+async function resolveDNS(domain: string, type: 'A' | 'AAAA'): Promise<string[]> {
+  const nativeResults = await resolveDNSNatively(domain, type);
+  if (nativeResults.length > 0) {
+    return nativeResults;
+  }
+  return await resolveDNSHTTP(domain, type);
+}
+
+async function validateTarget(domain: string): Promise<{ valid: boolean; reason?: string }> {
+  const cleaned = domain.trim();
+  
+  let checkIp = cleaned;
+  if (checkIp.startsWith('[') && checkIp.endsWith(']')) {
+    checkIp = checkIp.slice(1, -1);
+  }
+  
+  if (isIPv4(checkIp)) {
+    if (isPrivateIPv4(checkIp)) {
+      return { valid: false, reason: `Target IP ${checkIp} is a private/reserved address.` };
+    }
+    return { valid: true };
+  }
+  
+  if (checkIp.includes(':')) {
+    if (isPrivateIPv6(checkIp)) {
+      return { valid: false, reason: `Target IP ${checkIp} is a private/reserved address.` };
+    }
+    return { valid: true };
+  }
+  
+  try {
+    const aRecords = await resolveDNS(cleaned, 'A');
+    const aaaaRecords = await resolveDNS(cleaned, 'AAAA');
+    const allIPs = [...aRecords, ...aaaaRecords];
+    
+    for (const ip of allIPs) {
+      if (isIPv4(ip)) {
+        if (isPrivateIPv4(ip)) {
+          return { valid: false, reason: `Domain resolves to a private IP: ${ip}` };
+        }
+      } else if (ip.includes(':')) {
+        if (isPrivateIPv6(ip)) {
+          return { valid: false, reason: `Domain resolves to a private IP: ${ip}` };
+        }
+      }
+    }
+  } catch (err) {
+    // skip
+  }
+  
+  const lowerDomain = cleaned.toLowerCase();
+  const localSuffixes = ['.local', '.internal', '.lan', '.localdomain', '.home', '.onion', '.i2p', '.invalid', '.test', '.example'];
+  if (lowerDomain === 'localhost' || localSuffixes.some(suffix => lowerDomain.endsWith(suffix))) {
+    return { valid: false, reason: `Target matches a private or local domain.` };
+  }
+  
+  if (!lowerDomain.includes('.')) {
+    return { valid: false, reason: `Single-label hostnames are not allowed.` };
+  }
+  
+  return { valid: true };
+}
+
+async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
+  let currentUrl = url;
+  let redirects = 0;
+  const maxRedirects = 5;
+  const originalRedirect = init?.redirect || 'follow';
+  
+  if (originalRedirect === 'manual' || originalRedirect === 'error') {
+    let urlObj;
+    try {
+      urlObj = new URL(currentUrl);
+    } catch {
+      throw new Error(`Invalid URL: ${currentUrl}`);
+    }
+    const validation = await validateTarget(urlObj.hostname);
+    if (!validation.valid) {
+      throw new Error(`SSRF blocked: ${validation.reason}`);
+    }
+    return await fetch(currentUrl, init);
+  }
+  
+  const fetchInit = { ...init, redirect: 'manual' as const };
+  
+  while (redirects < maxRedirects) {
+    let urlObj;
+    try {
+      urlObj = new URL(currentUrl);
+    } catch {
+      throw new Error(`Invalid URL: ${currentUrl}`);
+    }
+    
+    const domain = urlObj.hostname;
+    const validation = await validateTarget(domain);
+    if (!validation.valid) {
+      throw new Error(`SSRF blocked: ${validation.reason}`);
+    }
+    
+    const response = await fetch(currentUrl, fetchInit);
+    
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) {
+        return response;
+      }
+      
+      const nextUrl = new URL(location, currentUrl).toString();
+      currentUrl = nextUrl;
+      redirects++;
+      continue;
+    }
+    
+    return response;
+  }
+  
+  throw new Error('Too many redirects');
+}
+
 interface ScanRequest {
   target: string;
   phase: 'recon' | 'active' | 'attack' | 'all';
@@ -468,7 +710,7 @@ async function scanHeaders(domain: string) {
 
   try {
     logs.push(`[HEADERS] Fetching ${targetUrl}...`);
-    const resp = await fetch(targetUrl, { redirect: 'follow', headers: { 'User-Agent': 'VulnRadar/1.0.0 Security Scanner' } });
+    const resp = await safeFetch(targetUrl, { redirect: 'follow', headers: { 'User-Agent': 'VulnRadar/1.0.0 Security Scanner' } });
     logs.push(`[HEADERS] Response: ${resp.status} ${resp.statusText}`);
     await resp.text();
 
@@ -547,7 +789,7 @@ async function checkRedirectChain(domain: string) {
   try {
     const httpUrl = `http://${domain.replace(/^https?:\/\//, '')}`;
     logs.push(`[REDIRECT] Checking HTTP → HTTPS redirect from ${httpUrl}...`);
-    const resp = await fetch(httpUrl, { redirect: 'manual' });
+    const resp = await safeFetch(httpUrl, { redirect: 'manual' });
     chain.push({ url: httpUrl, status: resp.status });
     if (resp.status >= 300 && resp.status < 400) {
       const location = resp.headers.get('location') || '';
@@ -565,7 +807,7 @@ async function checkRedirectChain(domain: string) {
     let url = `https://${domain.replace(/^https?:\/\//, '')}`;
     let redirectCount = 0;
     while (redirectCount < 10) {
-      const resp = await fetch(url, { redirect: 'manual' });
+      const resp = await safeFetch(url, { redirect: 'manual' });
       if (resp.status >= 300 && resp.status < 400) {
         const location = resp.headers.get('location') || '';
         chain.push({ url, status: resp.status });
@@ -597,7 +839,7 @@ async function scanSensitiveFiles(domain: string) {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 4000);
-        const resp = await fetch(`${baseUrl}${item.path}`, {
+        const resp = await safeFetch(`${baseUrl}${item.path}`, {
           signal: controller.signal,
           redirect: 'follow',
           headers: { 'User-Agent': 'VulnRadar/1.0.0 Security Scanner' },
@@ -638,7 +880,7 @@ async function scanSSL(domain: string) {
 
   try {
     logs.push(`[SSL] Connecting to ${targetUrl}...`);
-    const resp = await fetch(targetUrl, { headers: { 'User-Agent': 'VulnRadar/1.0.0' } });
+    const resp = await safeFetch(targetUrl, { headers: { 'User-Agent': 'VulnRadar/1.0.0' } });
     await resp.text();
     if (resp.ok || resp.status < 500) {
       logs.push(`[SSL] ✓ HTTPS connection successful (${resp.status})`);
@@ -681,7 +923,7 @@ async function scanSSL(domain: string) {
     } else {
       logs.push(`[SSL] Connection failed: ${errMsg}`);
       try {
-        const httpResp = await fetch(`http://${domain.replace(/^https?:\/\//, '')}`);
+        const httpResp = await safeFetch(`http://${domain.replace(/^https?:\/\//, '')}`);
         await httpResp.text();
         sslInfo.grade = 'F';
         sslInfo.issues.push('Site accessible via HTTP only');
@@ -702,7 +944,7 @@ async function probePort(domain: string, port: number, service: string): Promise
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const resp = await fetch(`${protocol}://${domain}:${port}/`, {
+    const resp = await safeFetch(`${protocol}://${domain}:${port}/`, {
       signal: controller.signal, redirect: 'follow', headers: { 'User-Agent': 'VulnRadar/1.0.0' },
     });
     clearTimeout(timeout);
@@ -802,7 +1044,7 @@ async function crawlUrl(url: string, domain: string, baseUrl: string) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(url, { signal: controller.signal, redirect: 'follow', headers: { 'User-Agent': 'VulnRadar/1.0.0 Security Spider' } });
+    const resp = await safeFetch(url, { signal: controller.signal, redirect: 'follow', headers: { 'User-Agent': 'VulnRadar/1.0.0 Security Spider' } });
     clearTimeout(timeout);
     const contentType = resp.headers.get('content-type') || '';
     if (!contentType.includes('text/html') && !contentType.includes('application/xhtml')) { await resp.text(); return null; }
@@ -911,7 +1153,7 @@ async function testSingleInjection(url: string, param: string, payload: string, 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0' }, redirect: 'follow' });
+    const resp = await safeFetch(url, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0' }, redirect: 'follow' });
     clearTimeout(timeout);
     const body = await resp.text();
 
@@ -951,7 +1193,7 @@ async function testPostInjection(baseUrl: string, endpoint: string, fields: Reco
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(url, {
+    const resp = await safeFetch(url, {
       method: 'POST', signal: controller.signal, redirect: 'follow',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'VulnRadar/1.0.0' },
       body: new URLSearchParams(fuzzedFields).toString(),
@@ -1072,7 +1314,7 @@ async function testInjection(domain: string, crawlData?: { discoveredParams: { p
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
-      const resp = await fetch(baseUrl, { signal: controller.signal, headers: { [hp.header]: hp.value, 'User-Agent': 'VulnRadar/1.0.0' }, redirect: 'follow' });
+      const resp = await safeFetch(baseUrl, { signal: controller.signal, headers: { [hp.header]: hp.value, 'User-Agent': 'VulnRadar/1.0.0' }, redirect: 'follow' });
       clearTimeout(timeout);
       const body = await resp.text();
       if (body.includes(hp.value)) {
@@ -1129,7 +1371,7 @@ async function testCORS(domain: string) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': 'https://evil.com' } });
+    const resp = await safeFetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': 'https://evil.com' } });
     clearTimeout(timeout);
     const acao = resp.headers.get('access-control-allow-origin');
     const acac = resp.headers.get('access-control-allow-credentials');
@@ -1150,7 +1392,7 @@ async function testCORS(domain: string) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': 'null' } });
+    const resp = await safeFetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': 'null' } });
     clearTimeout(timeout);
     if (resp.headers.get('access-control-allow-origin') === 'null') {
       findings.push({ type: 'null_origin', description: 'CORS accepts "null" origin', severity: 'high', evidence: 'Sent Origin: null, received ACAO: null' });
@@ -1163,7 +1405,7 @@ async function testCORS(domain: string) {
     const attackerOrigin = `https://attacker.${domain.replace(/^https?:\/\//, '')}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': attackerOrigin } });
+    const resp = await safeFetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': attackerOrigin } });
     clearTimeout(timeout);
     if (resp.headers.get('access-control-allow-origin') === attackerOrigin) {
       findings.push({ type: 'subdomain_bypass', description: 'CORS trusts arbitrary subdomains', severity: 'high', evidence: `Origin: ${attackerOrigin} accepted` });
@@ -1176,7 +1418,7 @@ async function testCORS(domain: string) {
     const httpOrigin = `http://${domain.replace(/^https?:\/\//, '')}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': httpOrigin } });
+    const resp = await safeFetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': httpOrigin } });
     clearTimeout(timeout);
     if (resp.headers.get('access-control-allow-origin') === httpOrigin) {
       findings.push({ type: 'insecure_scheme', description: 'CORS trusts HTTP origin on HTTPS site', severity: 'medium', evidence: `HTTPS site accepts HTTP origin: ${httpOrigin}` });
@@ -1188,7 +1430,7 @@ async function testCORS(domain: string) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(baseUrl, {
+    const resp = await safeFetch(baseUrl, {
       method: 'OPTIONS', signal: controller.signal,
       headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': 'https://evil.com', 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'X-Custom-Header' },
     });
@@ -1234,7 +1476,7 @@ async function testOpenRedirects(domain: string) {
           try {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 5000);
-            const resp = await fetch(testUrl, { signal: controller.signal, redirect: 'manual', headers: { 'User-Agent': 'VulnRadar/1.0.0' } });
+            const resp = await safeFetch(testUrl, { signal: controller.signal, redirect: 'manual', headers: { 'User-Agent': 'VulnRadar/1.0.0' } });
             clearTimeout(timeout);
             if (resp.status >= 300 && resp.status < 400) {
               const location = resp.headers.get('location') || '';
@@ -1435,6 +1677,14 @@ Deno.serve(async (req) => {
     }
 
     const domain = target.replace(/^https?:\/\//, '').replace(/\/.*$/, '').trim();
+    
+    // Validate target domain/IP to prevent SSRF
+    const validation = await validateTarget(domain);
+    if (!validation.valid) {
+      return new Response(JSON.stringify({ success: false, error: `SSRF Blocked: ${validation.reason}` }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     console.log(`Scanning target: ${domain}, phase: ${phase}`);
 
     const allLogs: string[] = [];
