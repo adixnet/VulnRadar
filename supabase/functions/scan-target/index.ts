@@ -1,3 +1,5 @@
+import { DOMParser } from "https://esm.sh/linkedom";
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
@@ -750,11 +752,12 @@ interface CrawlResult {
 
 function extractLinks(html: string, baseUrl: string, domain: string): string[] {
   const links = new Set<string>();
-  const hrefRegex = /href=["']([^"'#]+)["']/gi;
-  let match;
-  while ((match = hrefRegex.exec(html)) !== null) {
-    try {
-      let href = match[1].trim();
+  try {
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const aTags = document.querySelectorAll("a[href]");
+    for (const a of aTags) {
+      let href = a.getAttribute("href")?.trim();
+      if (!href) continue;
       if (href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:') || href.startsWith('data:')) continue;
       if (href.startsWith('/')) href = `${baseUrl}${href}`;
       else if (!href.startsWith('http')) href = `${baseUrl}/${href}`;
@@ -762,8 +765,8 @@ function extractLinks(html: string, baseUrl: string, domain: string): string[] {
       if (urlObj.hostname === domain || urlObj.hostname.endsWith(`.${domain}`)) {
         links.add(`${urlObj.origin}${urlObj.pathname}${urlObj.search}`);
       }
-    } catch { /* invalid URL */ }
-  }
+    }
+  } catch { /* invalid html or URL */ }
   return Array.from(links);
 }
 
@@ -778,23 +781,23 @@ function extractParams(url: string): { path: string; param: string }[] {
 
 function extractForms(html: string, pageUrl: string, baseUrl: string): { action: string; method: string; fields: string[] }[] {
   const forms: { action: string; method: string; fields: string[] }[] = [];
-  const formRegex = /<form\s[^>]*>([\s\S]*?)<\/form>/gi;
-  let formMatch;
-  while ((formMatch = formRegex.exec(html)) !== null) {
-    const formTag = formMatch[0];
-    const formInner = formMatch[1];
-    const actionMatch = formTag.match(/action=["']([^"']*)["']/i);
-    let action = actionMatch?.[1] || pageUrl;
-    if (action.startsWith('/')) action = `${baseUrl}${action}`;
-    else if (!action.startsWith('http')) action = `${baseUrl}/${action}`;
-    const methodMatch = formTag.match(/method=["'](\w+)["']/i);
-    const method = (methodMatch?.[1] || 'GET').toUpperCase();
-    const fields: string[] = [];
-    const inputRegex = /(?:<input|<textarea|<select)\s[^>]*name=["']([^"']+)["']/gi;
-    let inputMatch;
-    while ((inputMatch = inputRegex.exec(formInner)) !== null) { fields.push(inputMatch[1]); }
-    if (fields.length > 0) forms.push({ action, method, fields });
-  }
+  try {
+    const document = new DOMParser().parseFromString(html, "text/html");
+    const formElements = document.querySelectorAll("form");
+    for (const form of formElements) {
+      let action = form.getAttribute("action") || pageUrl;
+      if (action.startsWith('/')) action = `${baseUrl}${action}`;
+      else if (!action.startsWith('http')) action = `${baseUrl}/${action}`;
+      const method = (form.getAttribute("method") || 'GET').toUpperCase();
+      const fields: string[] = [];
+      const inputs = form.querySelectorAll("input[name], textarea[name], select[name]");
+      for (const input of inputs) {
+        const name = input.getAttribute("name");
+        if (name) fields.push(name);
+      }
+      if (fields.length > 0) forms.push({ action, method, fields });
+    }
+  } catch { /* parse error */ }
   return forms;
 }
 
@@ -805,8 +808,39 @@ async function crawlUrl(url: string, domain: string, baseUrl: string) {
     const resp = await fetch(url, { signal: controller.signal, redirect: 'follow', headers: { 'User-Agent': 'VulnRadar/1.0.0 Security Spider' } });
     clearTimeout(timeout);
     const contentType = resp.headers.get('content-type') || '';
-    if (!contentType.includes('text/html') && !contentType.includes('application/xhtml')) { await resp.text(); return null; }
-    const html = await resp.text();
+    if (!contentType.includes('text/html') && !contentType.includes('application/xhtml')) {
+      if (resp.body) await resp.body.cancel();
+      return null;
+    }
+    
+    const MAX_SIZE = 1024 * 1024; // 1MB limit
+    let size = 0;
+    const reader = resp.body?.getReader();
+    if (!reader) return null;
+    
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        size += value.length;
+        if (size > MAX_SIZE) {
+          await reader.cancel('Response too large');
+          break;
+        }
+        chunks.push(value);
+      }
+    }
+    
+    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+    const fullBuffer = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      fullBuffer.set(chunk, offset);
+      offset += chunk.length;
+    }
+    const html = new TextDecoder().decode(fullBuffer);
+
     const links = extractLinks(html, baseUrl, domain);
     const params = extractParams(url);
     for (const link of links) params.push(...extractParams(link));
