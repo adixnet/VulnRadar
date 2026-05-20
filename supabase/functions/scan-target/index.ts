@@ -829,7 +829,7 @@ async function spiderTarget(domain: string): Promise<CrawlResult> {
   logs.push(`[SPIDER] Target: ${baseUrl}`);
   logs.push(`[SPIDER] Max depth: ${maxDepth}, Max pages: ${maxPages}`);
 
-  let queue: { url: string; depth: number }[] = [{ url: baseUrl, depth: 0 }];
+  const queue: { url: string; depth: number }[] = [{ url: baseUrl, depth: 0 }];
   const seedPaths = ['/', '/login', '/search', '/contact', '/api', '/sitemap.xml', '/about', '/register', '/signup', '/dashboard', '/admin', '/help'];
   for (const sp of seedPaths) queue.push({ url: `${baseUrl}${sp}`, depth: 0 });
 

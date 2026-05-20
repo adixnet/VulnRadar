@@ -5,6 +5,14 @@ import type { Database } from './types';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
+// Provide a clearer development-time message when env vars are missing.
+if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+  // Throwing here makes the problem visible early with guidance.
+  throw new Error(
+    'Supabase environment variables are missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in a .env file (see .env.example).'
+  );
+}
+
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 

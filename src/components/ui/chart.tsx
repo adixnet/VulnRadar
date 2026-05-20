@@ -68,20 +68,31 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   return (
     <style
       dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
-  })
-  .join("\n")}
-}
-`,
-          )
-          .join("\n"),
+        __html: (() => {
+          function isValidColor(value?: string) {
+            if (!value || typeof value !== 'string') return false;
+            const hex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+            const rgb = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(0|1|0?\.\d+))?\s*\)$/i;
+            const cssVar = /^var\(--[a-z0-9\-]+\)$/i;
+            const named = /^[a-z]+$/i;
+            return hex.test(value) || rgb.test(value) || cssVar.test(value) || named.test(value);
+          }
+
+          return Object.entries(THEMES)
+            .map(([theme, prefix]) => {
+              const body = colorConfig
+                .map(([key, itemConfig]) => {
+                  const rawColor = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
+                  const color = isValidColor(rawColor) ? rawColor : null;
+                  return color ? `  --color-${key}: ${color};` : null;
+                })
+                .filter(Boolean)
+                .join('\n');
+
+              return `${prefix} [data-chart=${id}] {\n${body}\n}`;
+            })
+            .join('\n');
+        })(),
       }}
     />
   );

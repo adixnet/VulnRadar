@@ -72,8 +72,9 @@ const Index = () => {
     }
   }, [target, addLog, toast]);
 
-  const openHistory = () => {
-    setHistory(getHistory());
+  const openHistory = async () => {
+    const hist = await getHistory();
+    setHistory(hist);
     setShowHistory(true);
     setCompareMode(false);
     setCompareScans([null, null]);
