@@ -73,11 +73,23 @@ const Index = () => {
   }, [target, addLog, toast]);
 
   const openHistory = async () => {
-    const hist = await getHistory();
-    setHistory(hist);
-    setShowHistory(true);
-    setCompareMode(false);
-    setCompareScans([null, null]);
+    try {
+      const hist = await getHistory();
+      setHistory(hist);
+      setShowHistory(true);
+      setCompareMode(false);
+      setCompareScans([null, null]);
+    } catch (err) {
+      setHistory([]);
+      setShowHistory(true);
+      setCompareMode(false);
+      setCompareScans([null, null]);
+      toast({
+        title: 'Failed to load history',
+        description: err instanceof Error ? err.message : 'Unable to load scan history',
+        variant: 'destructive',
+      });
+    }
   };
 
   const loadScan = (stored: StoredScan) => {

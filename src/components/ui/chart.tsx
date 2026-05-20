@@ -37,7 +37,12 @@ const ChartContainer = React.forwardRef<
   }
 >(({ id, className, children, config, ...props }, ref) => {
   const uniqueId = React.useId();
-  const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+  function escapeCssIdentifier(value: string) {
+    return value.replace(/[^a-zA-Z0-9_-]/g, "");
+  }
+
+  const rawId = id || uniqueId.replace(/:/g, "");
+  const safeChartId = `chart-${escapeCssIdentifier(String(rawId))}`;
 
   return (
     <ChartContext.Provider value={{ config }}>
@@ -50,7 +55,7 @@ const ChartContainer = React.forwardRef<
         )}
         {...props}
       >
-        <ChartStyle id={chartId} config={config} />
+        <ChartStyle id={safeChartId} config={config} />
         <RechartsPrimitive.ResponsiveContainer>{children}</RechartsPrimitive.ResponsiveContainer>
       </div>
     </ChartContext.Provider>
@@ -65,6 +70,7 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
+  // Render safe CSS with validated colors and escaped identifiers
   return (
     <style
       dangerouslySetInnerHTML={{
@@ -78,18 +84,24 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
             return hex.test(value) || rgb.test(value) || cssVar.test(value) || named.test(value);
           }
 
+          function escapeCssIdentifier(value?: string) {
+            return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '');
+          }
+
           return Object.entries(THEMES)
             .map(([theme, prefix]) => {
               const body = colorConfig
                 .map(([key, itemConfig]) => {
                   const rawColor = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
                   const color = isValidColor(rawColor) ? rawColor : null;
-                  return color ? `  --color-${key}: ${color};` : null;
+                  const safeKey = escapeCssIdentifier(key);
+                  return color ? `  --color-${safeKey}: ${color};` : null;
                 })
                 .filter(Boolean)
                 .join('\n');
 
-              return `${prefix} [data-chart=${id}] {\n${body}\n}`;
+              const safeId = escapeCssIdentifier(id);
+              return `${prefix} [data-chart="${safeId}"] {\n${body}\n}`;
             })
             .join('\n');
         })(),
