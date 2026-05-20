@@ -167,7 +167,7 @@ function saveToLocalStorage(entry: StoredScan) {
 
       // Recovery failed completely
       if (!recovered) {
-        console.error(
+        throw new Error(
           'Unable to recover from localStorage quota exceeded error.'
         );
       }
