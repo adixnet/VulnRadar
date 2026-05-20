@@ -6,6 +6,10 @@ import { cn } from "@/lib/utils";
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
 
+function escapeCssIdentifier(value?: string) {
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
 export type ChartConfig = {
   [k in string]: {
     label?: React.ReactNode;
@@ -37,17 +41,13 @@ const ChartContainer = React.forwardRef<
   }
 >(({ id, className, children, config, ...props }, ref) => {
   const uniqueId = React.useId();
-  function escapeCssIdentifier(value: string) {
-    return value.replace(/[^a-zA-Z0-9_-]/g, "");
-  }
-
   const rawId = id || uniqueId.replace(/:/g, "");
   const safeChartId = `chart-${escapeCssIdentifier(String(rawId))}`;
 
   return (
     <ChartContext.Provider value={{ config }}>
       <div
-        data-chart={chartId}
+        data-chart={safeChartId}
         ref={ref}
         className={cn(
           "flex aspect-video justify-center text-xs [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-none [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-sector]:outline-none [&_.recharts-surface]:outline-none",
@@ -82,10 +82,6 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
             const cssVar = /^var\(--[a-z0-9\-]+\)$/i;
             const named = /^[a-z]+$/i;
             return hex.test(value) || rgb.test(value) || cssVar.test(value) || named.test(value);
-          }
-
-          function escapeCssIdentifier(value?: string) {
-            return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '');
           }
 
           return Object.entries(THEMES)
