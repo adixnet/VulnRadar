@@ -128,15 +128,17 @@ function saveToLocalStorage(entry: StoredScan) {
     );
   } catch (err) {
     if (
-      err instanceof DOMException &&
-      err.name === 'QuotaExceededError'
-    ) {
-      console.warn(
-        'Local storage quota exceeded. Trimming old scan history.'
-      );
+  err instanceof DOMException &&
+  err.name === 'QuotaExceededError'
+) {
+    console.warn(
+      'Local storage quota exceeded. Trimming old scan history.'
+    );
 
-      // Remove oldest entries until storage succeeds
-      while (history.length > 1) {
+    let recovered = false;
+
+    // Remove oldest entries until storage succeeds
+    while (history.length > 1) {
         history.pop();
 
         try {
@@ -149,6 +151,7 @@ function saveToLocalStorage(entry: StoredScan) {
             'Recovered by trimming old scan history.'
           );
 
+          recovered = true;
           break;
         } catch (retryErr) {
           if (
@@ -161,8 +164,15 @@ function saveToLocalStorage(entry: StoredScan) {
           }
         }
       }
-    } else {
-      throw err;
+
+      // Recovery failed completely
+      if (!recovered) {
+        console.error(
+          'Unable to recover from localStorage quota exceeded error.'
+        );
+      }
+  } else {
+    throw err;
     }
   }
 }
