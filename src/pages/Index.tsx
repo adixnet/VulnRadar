@@ -31,7 +31,7 @@ const Index = () => {
   const [compareScans, setCompareScans] = useState<[ScanResult | null, ScanResult | null]>([null, null]);
   const { toast } = useToast();
   const logsRef = useRef<string[]>([]);
-
+  const cancelRef = useRef<(() => void) | null>(null);
   const addLog = useCallback((log: string) => {
     logsRef.current = [...logsRef.current, log];
     setLogs([...logsRef.current]);
@@ -51,6 +51,9 @@ const Index = () => {
     setCompareMode(false);
 
     try {
+      let cancelled = false;
+      cancelRef.current = () => { cancelled = true; };
+
       const scanResult = await performRealScan(
         target.trim(),
         addLog,
@@ -59,6 +62,12 @@ const Index = () => {
           setPhaseProgress(progress);
         }
       );
+
+      if (cancelled) {
+        setScanState('idle');
+        setLogs([]);
+        return;
+      }
 
       setResult(scanResult);
       setScanState('complete');
@@ -318,9 +327,26 @@ const Index = () => {
                 <h2 className="text-lg sm:text-xl font-bold text-foreground">Live Scanning</h2>
                 <p className="text-sm font-mono text-primary">{target}</p>
               </div>
-              <div className="text-xs font-mono text-muted-foreground animate-pulse flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                Phase {Math.min(currentPhaseIndex + 1, SCAN_PHASES.length)}/{SCAN_PHASES.length}
+              <div className="flex items-center gap-3">
+                <div className="text-xs font-mono text-muted-foreground animate-pulse flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                  Phase {Math.min(currentPhaseIndex + 1, SCAN_PHASES.length)}/{SCAN_PHASES.length}
+                </div>
+                <Button
+                  onClick={() => {
+                    if (cancelRef.current) cancelRef.current();
+                    setScanState('idle');
+                    setLogs([]);
+                    setTarget('');
+                    addLog('⚠ Scan cancelled by user.');
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 border-destructive/50 text-destructive hover:bg-destructive/10 hover:border-destructive hover:text-white"
+                >
+                  <span className="w-2 h-2 rounded-full bg-destructive" />
+                  Cancel Scan
+                </Button>
               </div>
             </div>
 
