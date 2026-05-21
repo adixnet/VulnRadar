@@ -24,24 +24,24 @@ describe('scan-history', () => {
   });
 
   describe('getHistory', () => {
-    it('should return an empty array when localStorage is empty', () => {
-      const history = getHistory();
+    it('should return an empty array when localStorage is empty', async () => {
+      const history = await getHistory();
       expect(history).toEqual([]);
     });
 
-    it('should return an empty array when localStorage contains invalid JSON', () => {
+    it('should return an empty array when localStorage contains invalid JSON', async () => {
       localStorage.setItem(STORAGE_KEY, 'invalid-json');
-      const history = getHistory();
+      const history = await getHistory();
       expect(history).toEqual([]);
     });
 
-    it('should return an empty array when localStorage contains null string', () => {
+    it('should return an empty array when localStorage contains null string', async () => {
       localStorage.setItem(STORAGE_KEY, 'null');
-      const history = getHistory();
+      const history = await getHistory();
       expect(history).toEqual([]);
     });
 
-    it('should return parsed history when localStorage contains valid data', () => {
+    it('should return parsed history when localStorage contains valid data', async () => {
       const mockHistory = [
         {
           id: 'scan-1',
@@ -55,36 +55,34 @@ describe('scan-history', () => {
       ];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(mockHistory));
       
-      const history = getHistory();
+      const history = await getHistory();
       expect(history.length).toBe(1);
       expect(history[0].result.target).toBe('example.com');
       expect(history[0].result.startTime).toBeInstanceOf(Date);
     });
 
-    it('should handle malformed history items gracefully', () => {
+    it('should handle malformed history items gracefully', async () => {
       // History is an array, but items might be missing fields
       const mockHistory = [{ id: 'scan-1' }]; // missing result
       localStorage.setItem(STORAGE_KEY, JSON.stringify(mockHistory));
       
-      const history = getHistory();
-      // Current implementation will throw in .map because s.result is undefined
-      // But the try-catch in getHistory should handle it
+      const history = await getHistory();
       expect(history).toEqual([]);
     });
   });
 
   describe('saveScan', () => {
-    it('should save a scan to localStorage', () => {
-      saveScan(mockScanResult);
+    it('should save a scan to localStorage', async () => {
+      await saveScan(mockScanResult);
       const raw = localStorage.getItem(STORAGE_KEY);
       const history = JSON.parse(raw || '[]');
       expect(history.length).toBe(1);
       expect(history[0].result.target).toBe('example.com');
     });
 
-    it('should limit history to MAX_HISTORY (20)', () => {
+    it('should limit history to MAX_HISTORY (20)', async () => {
       for (let i = 0; i < 25; i++) {
-        saveScan({ ...mockScanResult, target: `example${i}.com` });
+        await saveScan({ ...mockScanResult, target: `example${i}.com` });
       }
       const raw = localStorage.getItem(STORAGE_KEY);
       const history = JSON.parse(raw || '[]');
@@ -94,10 +92,10 @@ describe('scan-history', () => {
   });
 
   describe('clearHistory', () => {
-    it('should remove the history from localStorage', () => {
-      saveScan(mockScanResult);
+    it('should remove the history from localStorage', async () => {
+      await saveScan(mockScanResult);
       expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
-      clearHistory();
+      await clearHistory();
       expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     });
   });

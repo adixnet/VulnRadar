@@ -1,3 +1,5 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
@@ -6,12 +8,19 @@ const corsHeaders = {
 interface ScanRequest {
   target: string;
   phase: 'recon' | 'active' | 'attack' | 'all';
+  scanId?: string;
   // For attack phase, pass crawl data from active phase
   crawlData?: {
     discoveredParams: { path: string; param: string }[];
     discoveredForms: { action: string; method: string; fields: string[] }[];
   };
 }
+
+const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+type ProgressCallback = (message: string, progress?: number) => void;
 
 const SECURITY_HEADERS = [
   'strict-transport-security',
@@ -250,12 +259,17 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 }
 
 // ==================== DNS ====================
-async function scanDNS(domain: string) {
+async function scanDNS(domain: string, onProgress?: ProgressCallback) {
   const logs: string[] = [];
   const records: { type: string; value: string }[] = [];
   const recordTypes = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA'];
 
-  for (const type of recordTypes) {
+  onProgress?.('[RECON] Querying DNS servers...', 10);
+
+  for (let i = 0; i < recordTypes.length; i++) {
+    const type = recordTypes[i];
+    const pct = Math.round(10 + (i / recordTypes.length) * 70);
+    onProgress?.(`[RECON] Querying DNS: Checking ${type} record...`, pct);
     try {
       const resp = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=${type}`);
       const data = await resp.json();
@@ -263,25 +277,46 @@ async function scanDNS(domain: string) {
         for (const answer of data.Answer) {
           const value = answer.data || answer.rdata || '';
           records.push({ type, value: String(value) });
-          logs.push(`[DNS] ${type} record: ${value}`);
+          const msg = `[DNS] ${type} record: ${value}`;
+          logs.push(msg);
+          onProgress?.(msg, pct);
         }
       } else {
-        logs.push(`[DNS] ${type} record: not found`);
+        const msg = `[DNS] ${type} record: not found`;
+        logs.push(msg);
+        onProgress?.(msg, pct);
       }
     } catch (e) {
-      logs.push(`[DNS] ${type} lookup failed: ${e instanceof Error ? e.message : 'unknown error'}`);
+      const msg = `[DNS] ${type} lookup failed: ${e instanceof Error ? e.message : 'unknown error'}`;
+      logs.push(msg);
+      onProgress?.(msg, pct);
     }
   }
 
   // SPF
+  onProgress?.('[RECON] Checking SPF/DMARC/DNSSEC records...', 80);
   const spfRecord = records.find(r => r.type === 'TXT' && r.value.includes('v=spf1'));
   if (spfRecord) {
-    logs.push(`[DNS] ✓ SPF record found: ${spfRecord.value}`);
-    if (spfRecord.value.includes('+all')) logs.push('[DNS] WARNING: SPF uses +all (allows ANY server)');
-    else if (spfRecord.value.includes('~all')) logs.push('[DNS] WARNING: SPF uses ~all (soft fail)');
-    else if (spfRecord.value.includes('-all')) logs.push('[DNS] ✓ SPF uses -all (strict)');
+    const msg = `[DNS] ✓ SPF record found: ${spfRecord.value}`;
+    logs.push(msg);
+    onProgress?.(msg, 82);
+    if (spfRecord.value.includes('+all')) {
+      const w = '[DNS] WARNING: SPF uses +all (allows ANY server)';
+      logs.push(w);
+      onProgress?.(w, 83);
+    } else if (spfRecord.value.includes('~all')) {
+      const w = '[DNS] WARNING: SPF uses ~all (soft fail)';
+      logs.push(w);
+      onProgress?.(w, 83);
+    } else if (spfRecord.value.includes('-all')) {
+      const g = '[DNS] ✓ SPF uses -all (strict)';
+      logs.push(g);
+      onProgress?.(g, 83);
+    }
   } else {
-    logs.push('[DNS] ✗ No SPF record found (email spoofing risk)');
+    const w = '[DNS] ✗ No SPF record found (email spoofing risk)';
+    logs.push(w);
+    onProgress?.(w, 83);
   }
 
   // DMARC
@@ -291,53 +326,91 @@ async function scanDNS(domain: string) {
     if (dmarcData.Answer && dmarcData.Answer.length > 0) {
       const dmarcValue = dmarcData.Answer[0].data || '';
       records.push({ type: 'DMARC', value: String(dmarcValue) });
-      if (String(dmarcValue).includes('p=none')) logs.push('[DNS] WARNING: DMARC policy is "none"');
-      else if (String(dmarcValue).includes('p=quarantine')) logs.push('[DNS] ✓ DMARC policy: quarantine');
-      else if (String(dmarcValue).includes('p=reject')) logs.push('[DNS] ✓ DMARC policy: reject (strongest)');
+      const msg = `[DNS] DMARC record: ${dmarcValue}`;
+      logs.push(msg);
+      onProgress?.(msg, 85);
+      if (String(dmarcValue).includes('p=none')) {
+        const w = '[DNS] WARNING: DMARC policy is "none"';
+        logs.push(w);
+        onProgress?.(w, 86);
+      } else if (String(dmarcValue).includes('p=quarantine')) {
+        const g = '[DNS] ✓ DMARC policy: quarantine';
+        logs.push(g);
+        onProgress?.(g, 86);
+      } else if (String(dmarcValue).includes('p=reject')) {
+        const g = '[DNS] ✓ DMARC policy: reject (strongest)';
+        logs.push(g);
+        onProgress?.(g, 86);
+      }
     } else {
-      logs.push('[DNS] ✗ No DMARC record found');
+      const w = '[DNS] ✗ No DMARC record found';
+      logs.push(w);
+      onProgress?.(w, 85);
     }
-  } catch { logs.push('[DNS] DMARC lookup failed'); }
+  } catch {
+    logs.push('[DNS] DMARC lookup failed');
+    onProgress?.('[DNS] DMARC lookup failed', 85);
+  }
 
   // DNSSEC
   try {
     const dnssecResp = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=DNSKEY`);
     const dnssecData = await dnssecResp.json();
     if (dnssecData.Answer && dnssecData.Answer.length > 0) {
-      logs.push('[DNS] ✓ DNSSEC: DNSKEY record found');
+      const g = '[DNS] ✓ DNSSEC: DNSKEY record found';
+      logs.push(g);
+      onProgress?.(g, 88);
       records.push({ type: 'DNSSEC', value: 'Enabled' });
     } else if (dnssecData.AD) {
-      logs.push('[DNS] ✓ DNSSEC: Authenticated response');
+      const g = '[DNS] ✓ DNSSEC: Authenticated response';
+      logs.push(g);
+      onProgress?.(g, 88);
       records.push({ type: 'DNSSEC', value: 'Enabled (AD flag)' });
     } else {
-      logs.push('[DNS] ✗ DNSSEC: Not enabled');
+      const w = '[DNS] ✗ DNSSEC: Not enabled';
+      logs.push(w);
+      onProgress?.(w, 88);
       records.push({ type: 'DNSSEC', value: 'Not enabled' });
     }
-  } catch { logs.push('[DNS] DNSSEC check failed'); }
+  } catch {
+    logs.push('[DNS] DNSSEC check failed');
+    onProgress?.('[DNS] DNSSEC check failed', 88);
+  }
 
   // CAA
+  onProgress?.('[RECON] Checking CAA records...', 90);
   try {
     const caaResp = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=CAA`);
     const caaData = await caaResp.json();
     if (caaData.Answer && caaData.Answer.length > 0) {
       for (const answer of caaData.Answer) {
         records.push({ type: 'CAA', value: String(answer.data || '') });
-        logs.push(`[DNS] ✓ CAA record: ${answer.data}`);
+        const g = `[DNS] ✓ CAA record: ${answer.data}`;
+        logs.push(g);
+        onProgress?.(g, 95);
       }
     } else {
-      logs.push('[DNS] ✗ No CAA record');
+      const w = '[DNS] ✗ No CAA record';
+      logs.push(w);
+      onProgress?.(w, 95);
     }
-  } catch { logs.push('[DNS] CAA lookup failed'); }
+  } catch {
+    logs.push('[DNS] CAA lookup failed');
+    onProgress?.('[DNS] CAA lookup failed', 95);
+  }
 
+  onProgress?.('[RECON] DNS Reconnaissance complete.', 100);
   return { logs, records };
 }
 
 // ==================== SUBDOMAINS ====================
-async function queryCertTransparency(domain: string): Promise<{ logs: string[]; subdomains: string[] }> {
+async function queryCertTransparency(domain: string, onProgress?: ProgressCallback): Promise<{ logs: string[]; subdomains: string[] }> {
   const logs: string[] = [];
   const found = new Set<string>();
   try {
-    logs.push('[SUBDOMAIN] Querying Certificate Transparency logs (crt.sh)...');
+    const m = '[SUBDOMAIN] Querying Certificate Transparency logs (crt.sh)...';
+    logs.push(m);
+    onProgress?.(m, 20);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
     const resp = await fetch(`https://crt.sh/?q=%25.${encodeURIComponent(domain)}&output=json`, { signal: controller.signal });
@@ -350,13 +423,19 @@ async function queryCertTransparency(domain: string): Promise<{ logs: string[]; 
           if (clean.endsWith(`.${domain}`) && clean !== domain && !clean.includes('*')) found.add(clean);
         }
       }
-      logs.push(`[SUBDOMAIN] CT logs returned ${found.size} unique subdomains`);
+      const m2 = `[SUBDOMAIN] CT logs returned ${found.size} unique subdomains`;
+      logs.push(m2);
+      onProgress?.(m2, 40);
     } else {
-      logs.push(`[SUBDOMAIN] CT log query returned ${resp.status}`);
+      const m2 = `[SUBDOMAIN] CT log query returned ${resp.status}`;
+      logs.push(m2);
+      onProgress?.(m2, 40);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown';
-    logs.push(msg.includes('abort') ? '[SUBDOMAIN] CT log query timed out (10s)' : `[SUBDOMAIN] CT log query failed: ${msg}`);
+    const m = msg.includes('abort') ? '[SUBDOMAIN] CT log query timed out (10s)' : `[SUBDOMAIN] CT log query failed: ${msg}`;
+    logs.push(m);
+    onProgress?.(m, 40);
   }
   return { logs, subdomains: Array.from(found) };
 }
@@ -373,20 +452,35 @@ async function resolveSubdomain(sub: string, domain: string): Promise<{ subdomai
   return null;
 }
 
-async function enumerateSubdomains(domain: string) {
+async function enumerateSubdomains(domain: string, onProgress?: ProgressCallback) {
   const logs: string[] = [];
   const subdomainMap = new Map<string, SubdomainInfo>();
 
-  logs.push('[SUBDOMAIN] Starting comprehensive subdomain enumeration...');
-  logs.push(`[SUBDOMAIN] Wordlist: ${COMMON_SUBDOMAINS.length} prefixes`);
+  const m1 = '[SUBDOMAIN] Starting comprehensive subdomain enumeration...';
+  logs.push(m1);
+  onProgress?.(m1, 10);
+  const m2 = `[SUBDOMAIN] Wordlist: ${COMMON_SUBDOMAINS.length} prefixes`;
+  logs.push(m2);
+  onProgress?.(m2, 12);
 
   // Run CT + DNS in parallel, but batch DNS to avoid overwhelming
+  onProgress?.('[SUBDOMAIN] Querying Certificate Transparency and resolving common prefixes...', 15);
+
+  const batches = chunkArray(COMMON_SUBDOMAINS, 25);
+
   const [ctResult, ...dnsResults] = await Promise.all([
-    queryCertTransparency(domain),
-    ...chunkArray(COMMON_SUBDOMAINS, 25).map(async (batch) => {
+    queryCertTransparency(domain, (msg, pct) => {
+      // Map 20-40% of queryCertTransparency to 15-35% of enumerateSubdomains
+      const mappedPct = pct ? Math.round(15 + (pct / 100) * 20) : 25;
+      onProgress?.(msg, mappedPct);
+    }),
+    ...batches.map(async (batch, batchIdx) => {
       const results: { subdomain: string; ips: string[] }[] = [];
       const batchResults = await Promise.all(batch.map(sub => resolveSubdomain(sub, domain)));
       for (const r of batchResults) { if (r) results.push(r); }
+
+      const pct = Math.round(35 + (batchIdx / batches.length) * 25);
+      onProgress?.(`[SUBDOMAIN] Resolved batch ${batchIdx + 1}/${batches.length}...`, pct);
       return results;
     }),
   ]);
@@ -401,14 +495,24 @@ async function enumerateSubdomains(domain: string) {
   // Resolve CT-only subs
   const ctOnlySubs = ctResult.subdomains.filter(s => !subdomainMap.has(s));
   if (ctOnlySubs.length > 0) {
-    logs.push(`[SUBDOMAIN] Resolving ${ctOnlySubs.length} CT-only subdomains...`);
+    const m3 = `[SUBDOMAIN] Resolving ${ctOnlySubs.length} CT-only subdomains...`;
+    logs.push(m3);
+    onProgress?.(m3, 60);
+
+    const sliceCount = 80;
+    const subsToResolve = ctOnlySubs.slice(0, sliceCount);
     const ctResolveResults = await Promise.all(
-      ctOnlySubs.slice(0, 80).map(async (sub) => {
+      subsToResolve.map(async (sub, subIdx) => {
         try {
           const resp = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(sub)}&type=A`);
           const data = await resp.json();
           if (data.Answer && data.Answer.length > 0) {
             const ips = data.Answer.filter((a: any) => a.type === 1).map((a: any) => String(a.data));
+
+            if (subIdx % 10 === 0) {
+              const pct = Math.round(60 + (subIdx / subsToResolve.length) * 20);
+              onProgress?.(`[SUBDOMAIN] Resolving CT subdomains: ${subIdx}/${subsToResolve.length}...`, pct);
+            }
             return { subdomain: sub, ips };
           }
         } catch { /* skip */ }
@@ -437,52 +541,84 @@ async function enumerateSubdomains(domain: string) {
   logs.push(`[SUBDOMAIN] Total unique subdomains: ${allSubs.length}`);
   logs.push(`[SUBDOMAIN] Unique IPs: ${uniqueIPs.size}`);
 
+  onProgress?.(`[SUBDOMAIN] Enumerated ${allSubs.length} subdomains on ${uniqueIPs.size} unique IPs`, 85);
+
   for (const info of allSubs.slice(0, 50)) {
     const ipStr = info.ips.length > 0 ? ` → ${info.ips.join(', ')}` : '';
     const srcTag = info.source === 'both' ? '[DNS+CT]' : info.source === 'crt.sh' ? '[CT]' : '[DNS]';
-    logs.push(`[SUBDOMAIN]   ${srcTag} ${info.subdomain}${ipStr}`);
+    const msg = `[SUBDOMAIN]   ${srcTag} ${info.subdomain}${ipStr}`;
+    logs.push(msg);
+    onProgress?.(msg, 90);
   }
-  if (allSubs.length > 50) logs.push(`[SUBDOMAIN]   ... and ${allSubs.length - 50} more`);
+  if (allSubs.length > 50) {
+    const msg = `[SUBDOMAIN]   ... and ${allSubs.length - 50} more`;
+    logs.push(msg);
+    onProgress?.(msg, 92);
+  }
 
   const devSubs = allSubs.filter(s => /\b(dev|test|staging|stg|qa|uat|sandbox|demo|beta|alpha|tmp|temp|old|legacy|backup)\b/i.test(s.subdomain));
   if (devSubs.length > 0) {
-    logs.push(`[SUBDOMAIN] ⚠️ ${devSubs.length} development/staging subdomains detected`);
-    for (const d of devSubs.slice(0, 10)) logs.push(`[SUBDOMAIN]   WARNING: ${d.subdomain}`);
+    const msg = `[SUBDOMAIN] ⚠️ ${devSubs.length} development/staging subdomains detected`;
+    logs.push(msg);
+    onProgress?.(msg, 95);
+    for (const d of devSubs.slice(0, 10)) {
+      const w = `[SUBDOMAIN]   WARNING: ${d.subdomain}`;
+      logs.push(w);
+      onProgress?.(w, 96);
+    }
   }
 
   const adminSubs = allSubs.filter(s => /\b(admin|panel|dashboard|manage|cpanel|whm|webmin|console)\b/i.test(s.subdomain));
   if (adminSubs.length > 0) {
-    logs.push(`[SUBDOMAIN] ⚠️ ${adminSubs.length} admin panel subdomains`);
-    for (const a of adminSubs.slice(0, 5)) logs.push(`[SUBDOMAIN]   WARNING: ${a.subdomain}`);
+    const msg = `[SUBDOMAIN] ⚠️ ${adminSubs.length} admin panel subdomains`;
+    logs.push(msg);
+    onProgress?.(msg, 98);
+    for (const a of adminSubs.slice(0, 5)) {
+      const w = `[SUBDOMAIN]   WARNING: ${a.subdomain}`;
+      logs.push(w);
+      onProgress?.(w, 99);
+    }
   }
 
+  onProgress?.('[SUBDOMAIN] Subdomain enumeration complete.', 100);
   return { logs, subdomains: allSubs.map(s => s.subdomain), subdomainDetails: allSubs };
 }
 
 // ==================== HEADERS ====================
-async function scanHeaders(domain: string) {
+async function scanHeaders(domain: string, onProgress?: ProgressCallback) {
   const logs: string[] = [];
   const headers: { name: string; value: string; status: 'secure' | 'warning' | 'missing' }[] = [];
   const technologies: { name: string; version: string; category: string }[] = [];
   const targetUrl = domain.startsWith('http') ? domain : `https://${domain}`;
 
   try {
-    logs.push(`[HEADERS] Fetching ${targetUrl}...`);
+    const m1 = `[HEADERS] Fetching ${targetUrl}...`;
+    logs.push(m1);
+    onProgress?.(m1, 20);
     const resp = await fetch(targetUrl, { redirect: 'follow', headers: { 'User-Agent': 'VulnRadar/1.0.0 Security Scanner' } });
-    logs.push(`[HEADERS] Response: ${resp.status} ${resp.statusText}`);
+    const m2 = `[HEADERS] Response: ${resp.status} ${resp.statusText}`;
+    logs.push(m2);
+    onProgress?.(m2, 40);
     await resp.text();
 
     const headerMap: Record<string, string> = {};
     resp.headers.forEach((value, key) => { headerMap[key.toLowerCase()] = value; });
 
-    for (const headerName of SECURITY_HEADERS) {
+    onProgress?.('[HEADERS] Analyzing security headers...', 50);
+    for (let i = 0; i < SECURITY_HEADERS.length; i++) {
+      const headerName = SECURITY_HEADERS[i];
+      const pct = Math.round(50 + (i / SECURITY_HEADERS.length) * 30);
       const displayName = headerName.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('-');
       if (headerMap[headerName]) {
         headers.push({ name: displayName, value: headerMap[headerName], status: 'secure' });
-        logs.push(`[HEADERS] ✓ ${displayName}: ${headerMap[headerName]}`);
+        const g = `[HEADERS] ✓ ${displayName}: ${headerMap[headerName]}`;
+        logs.push(g);
+        onProgress?.(g, pct);
       } else {
         headers.push({ name: displayName, value: '', status: 'missing' });
-        logs.push(`[HEADERS] ✗ ${displayName}: MISSING`);
+        const w = `[HEADERS] ✗ ${displayName}: MISSING`;
+        logs.push(w);
+        onProgress?.(w, pct);
       }
     }
 
@@ -490,16 +626,31 @@ async function scanHeaders(domain: string) {
     const hstsVal = headerMap['strict-transport-security'] || '';
     if (hstsVal) {
       const maxAge = hstsVal.match(/max-age=(\d+)/)?.[1];
-      if (maxAge && parseInt(maxAge) < 31536000) logs.push(`[HEADERS] WARNING: HSTS max-age is ${maxAge}s (should be ≥31536000)`);
-      if (!hstsVal.includes('includeSubDomains')) logs.push('[HEADERS] WARNING: HSTS missing includeSubDomains');
-      if (!hstsVal.includes('preload')) logs.push('[HEADERS] INFO: HSTS missing preload');
+      if (maxAge && parseInt(maxAge) < 31536000) {
+        const w = `[HEADERS] WARNING: HSTS max-age is ${maxAge}s (should be ≥31536000)`;
+        logs.push(w);
+        onProgress?.(w, 82);
+      }
+      if (!hstsVal.includes('includeSubDomains')) {
+        const w = '[HEADERS] WARNING: HSTS missing includeSubDomains';
+        logs.push(w);
+        onProgress?.(w, 83);
+      }
+      if (!hstsVal.includes('preload')) {
+        const inf = '[HEADERS] INFO: HSTS missing preload';
+        logs.push(inf);
+        onProgress?.(inf, 84);
+      }
     }
 
     // Info-leaking headers
+    onProgress?.('[HEADERS] Fingerprinting technologies and framework signatures...', 85);
     const serverHeader = headerMap['server'];
     if (serverHeader) {
       headers.push({ name: 'Server', value: serverHeader, status: 'warning' });
-      logs.push(`[HEADERS] WARNING: Server header reveals: ${serverHeader}`);
+      const w = `[HEADERS] WARNING: Server header reveals: ${serverHeader}`;
+      logs.push(w);
+      onProgress?.(w, 87);
       if (serverHeader.toLowerCase().includes('nginx')) technologies.push({ name: 'nginx', version: serverHeader.match(/nginx\/([\d.]+)/)?.[1] || 'unknown', category: 'Web Server' });
       if (serverHeader.toLowerCase().includes('apache')) technologies.push({ name: 'Apache', version: serverHeader.match(/Apache\/([\d.]+)/)?.[1] || 'unknown', category: 'Web Server' });
       if (serverHeader.toLowerCase().includes('cloudflare')) technologies.push({ name: 'Cloudflare', version: '-', category: 'CDN' });
@@ -508,7 +659,9 @@ async function scanHeaders(domain: string) {
 
     const poweredBy = headerMap['x-powered-by'];
     if (poweredBy) {
-      logs.push(`[HEADERS] WARNING: X-Powered-By reveals: ${poweredBy}`);
+      const w = `[HEADERS] WARNING: X-Powered-By reveals: ${poweredBy}`;
+      logs.push(w);
+      onProgress?.(w, 89);
       technologies.push({ name: poweredBy.split('/')[0], version: poweredBy.split('/')[1] || 'unknown', category: 'Framework' });
     }
 
@@ -520,79 +673,136 @@ async function scanHeaders(domain: string) {
     if (headerMap['cf-ray']) technologies.push({ name: 'Cloudflare', version: '-', category: 'CDN' });
 
     const cors = headerMap['access-control-allow-origin'];
-    if (cors === '*') logs.push('[HEADERS] WARNING: CORS allows all origins (*)');
-    else if (cors) logs.push(`[HEADERS] CORS origin: ${cors}`);
+    if (cors === '*') {
+      const w = '[HEADERS] WARNING: CORS allows all origins (*)';
+      logs.push(w);
+      onProgress?.(w, 92);
+    } else if (cors) {
+      const inf = `[HEADERS] CORS origin: ${cors}`;
+      logs.push(inf);
+      onProgress?.(inf, 92);
+    }
 
     const setCookie = headerMap['set-cookie'];
     if (setCookie) {
-      if (!setCookie.toLowerCase().includes('httponly')) logs.push('[HEADERS] WARNING: Cookie missing HttpOnly flag');
-      if (!setCookie.toLowerCase().includes('secure')) logs.push('[HEADERS] WARNING: Cookie missing Secure flag');
-      if (!setCookie.toLowerCase().includes('samesite')) logs.push('[HEADERS] WARNING: Cookie missing SameSite');
+      if (!setCookie.toLowerCase().includes('httponly')) {
+        const w = '[HEADERS] WARNING: Cookie missing HttpOnly flag';
+        logs.push(w);
+        onProgress?.(w, 94);
+      }
+      if (!setCookie.toLowerCase().includes('secure')) {
+        const w = '[HEADERS] WARNING: Cookie missing Secure flag';
+        logs.push(w);
+        onProgress?.(w, 95);
+      }
+      if (!setCookie.toLowerCase().includes('samesite')) {
+        const w = '[HEADERS] WARNING: Cookie missing SameSite';
+        logs.push(w);
+        onProgress?.(w, 96);
+      }
     }
 
     const missingCount = headers.filter(h => h.status === 'missing').length;
-    logs.push(`[HEADERS] Summary: ${headers.filter(h => h.status === 'secure').length} secure, ${missingCount} missing, ${headers.filter(h => h.status === 'warning').length} warnings`);
+    const m3 = `[HEADERS] Summary: ${headers.filter(h => h.status === 'secure').length} secure, ${missingCount} missing, ${headers.filter(h => h.status === 'warning').length} warnings`;
+    logs.push(m3);
+    onProgress?.(m3, 98);
   } catch (e) {
-    logs.push(`[HEADERS] ERROR: Failed to fetch target — ${e instanceof Error ? e.message : 'unknown'}`);
+    const errM = `[HEADERS] ERROR: Failed to fetch target — ${e instanceof Error ? e.message : 'unknown'}`;
+    logs.push(errM);
+    onProgress?.(errM, 98);
   }
 
+  onProgress?.('[HEADERS] HTTP Security Headers analysis complete.', 100);
   return { logs, headers, technologies };
 }
 
 // ==================== REDIRECT CHAIN ====================
-async function checkRedirectChain(domain: string) {
+async function checkRedirectChain(domain: string, onProgress?: ProgressCallback) {
   const logs: string[] = [];
   const chain: { url: string; status: number }[] = [];
 
   try {
     const httpUrl = `http://${domain.replace(/^https?:\/\//, '')}`;
-    logs.push(`[REDIRECT] Checking HTTP → HTTPS redirect from ${httpUrl}...`);
+    const m1 = `[REDIRECT] Checking HTTP → HTTPS redirect from ${httpUrl}...`;
+    logs.push(m1);
+    onProgress?.(m1, 20);
     const resp = await fetch(httpUrl, { redirect: 'manual' });
     chain.push({ url: httpUrl, status: resp.status });
     if (resp.status >= 300 && resp.status < 400) {
       const location = resp.headers.get('location') || '';
       chain.push({ url: location, status: 0 });
-      if (location.startsWith('https://')) logs.push(`[REDIRECT] ✓ HTTP redirects to HTTPS: ${location}`);
-      else logs.push(`[REDIRECT] WARNING: HTTP redirects but NOT to HTTPS: ${location}`);
+      if (location.startsWith('https://')) {
+        const g = `[REDIRECT] ✓ HTTP redirects to HTTPS: ${location}`;
+        logs.push(g);
+        onProgress?.(g, 40);
+      } else {
+        const w = `[REDIRECT] WARNING: HTTP redirects but NOT to HTTPS: ${location}`;
+        logs.push(w);
+        onProgress?.(w, 40);
+      }
     } else if (resp.status === 200) {
-      logs.push('[REDIRECT] ✗ HTTP responds with 200 — no redirect to HTTPS!');
+      const w = '[REDIRECT] ✗ HTTP responds with 200 — no redirect to HTTPS!';
+      logs.push(w);
+      onProgress?.(w, 40);
     }
   } catch (e) {
-    logs.push(`[REDIRECT] HTTP check failed: ${e instanceof Error ? e.message : 'unknown'}`);
+    const errM = `[REDIRECT] HTTP check failed: ${e instanceof Error ? e.message : 'unknown'}`;
+    logs.push(errM);
+    onProgress?.(errM, 40);
   }
 
   try {
     let url = `https://${domain.replace(/^https?:\/\//, '')}`;
     let redirectCount = 0;
+    onProgress?.('[REDIRECT] Tracing redirect chain...', 50);
     while (redirectCount < 10) {
+      const pct = Math.round(50 + (redirectCount / 10) * 40);
       const resp = await fetch(url, { redirect: 'manual' });
       if (resp.status >= 300 && resp.status < 400) {
         const location = resp.headers.get('location') || '';
         chain.push({ url, status: resp.status });
         url = location.startsWith('http') ? location : `https://${domain}${location}`;
         redirectCount++;
+        onProgress?.(`[REDIRECT] Redirect ${redirectCount}: ${resp.status} → ${url}`, pct);
       } else {
         chain.push({ url, status: resp.status });
         break;
       }
     }
-    if (redirectCount > 3) logs.push(`[REDIRECT] WARNING: ${redirectCount} redirects detected`);
-    else if (redirectCount > 0) logs.push(`[REDIRECT] ${redirectCount} redirect(s) in chain`);
-  } catch { logs.push('[REDIRECT] Could not trace full redirect chain'); }
+    if (redirectCount > 3) {
+      const w = `[REDIRECT] WARNING: ${redirectCount} redirects detected`;
+      logs.push(w);
+      onProgress?.(w, 95);
+    } else if (redirectCount > 0) {
+      const g = `[REDIRECT] ${redirectCount} redirect(s) in chain`;
+      logs.push(g);
+      onProgress?.(g, 95);
+    }
+  } catch {
+    logs.push('[REDIRECT] Could not trace full redirect chain');
+    onProgress?.('[REDIRECT] Could not trace full redirect chain', 95);
+  }
 
+  onProgress?.('[REDIRECT] Redirect chain analysis complete.', 100);
   return { logs, chain };
 }
 
 // ==================== SENSITIVE FILES ====================
-async function scanSensitiveFiles(domain: string) {
+async function scanSensitiveFiles(domain: string, onProgress?: ProgressCallback) {
   const logs: string[] = [];
   const exposed: { path: string; name: string; status: number; severity: string }[] = [];
   const baseUrl = `https://${domain.replace(/^https?:\/\//, '')}`;
 
-  logs.push(`[FILES] Checking ${SENSITIVE_PATHS.length} paths for exposed files...`);
+  const m1 = `[FILES] Checking ${SENSITIVE_PATHS.length} paths for exposed files...`;
+  logs.push(m1);
+  onProgress?.(m1, 10);
 
   // Batch in groups to avoid too many concurrent requests
-  for (const batch of chunkArray(SENSITIVE_PATHS, 8)) {
+  const batches = chunkArray(SENSITIVE_PATHS, 8);
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const pct = Math.round(10 + (i / batches.length) * 80);
+    onProgress?.(`[FILES] Probing files batch ${i+1}/${batches.length}...`, pct);
     const results = await Promise.all(batch.map(async (item) => {
       try {
         const controller = new AbortController();
@@ -617,33 +827,50 @@ async function scanSensitiveFiles(domain: string) {
       if (r.found && r.severity !== 'info') {
         exposed.push({ path: r.path, name: r.name, status: r.status, severity: r.severity });
         const icon = r.severity === 'critical' ? '‼️' : r.severity === 'high' ? '⚠️' : 'ℹ️';
-        logs.push(`[FILES] ${icon} EXPOSED: ${r.name} at ${r.path} — ${r.severity.toUpperCase()}`);
+        const msg = `[FILES] ${icon} EXPOSED: ${r.name} at ${r.path} — ${r.severity.toUpperCase()}`;
+        logs.push(msg);
+        onProgress?.(msg, pct);
       } else if (r.found) {
-        logs.push(`[FILES] ℹ️ Found: ${r.name} at ${r.path}`);
+        const msg = `[FILES] ℹ️ Found: ${r.name} at ${r.path}`;
+        logs.push(msg);
+        onProgress?.(msg, pct);
       }
     }
   }
 
-  if (exposed.length === 0) logs.push('[FILES] ✓ No critical sensitive files exposed');
-  else logs.push(`[FILES] ✗ ${exposed.length} sensitive file(s) exposed!`);
+  if (exposed.length === 0) {
+    const g = '[FILES] ✓ No critical sensitive files exposed';
+    logs.push(g);
+    onProgress?.(g, 95);
+  } else {
+    const w = `[FILES] ✗ ${exposed.length} sensitive file(s) exposed!`;
+    logs.push(w);
+    onProgress?.(w, 95);
+  }
 
+  onProgress?.('[FILES] Sensitive file check complete.', 100);
   return { logs, exposed };
 }
 
 // ==================== SSL ====================
-async function scanSSL(domain: string) {
+async function scanSSL(domain: string, onProgress?: ProgressCallback) {
   const logs: string[] = [];
   const sslInfo = { grade: 'Unknown', expiry: 'Unknown', protocol: 'Unknown', cipher: 'Unknown', issues: [] as string[], issuer: 'Unknown', subject: 'Unknown' };
   const targetUrl = `https://${domain.replace(/^https?:\/\//, '')}`;
 
   try {
-    logs.push(`[SSL] Connecting to ${targetUrl}...`);
+    const m = `[SSL] Connecting to ${targetUrl}...`;
+    logs.push(m);
+    onProgress?.(m, 10);
     const resp = await fetch(targetUrl, { headers: { 'User-Agent': 'VulnRadar/1.0.0' } });
     await resp.text();
     if (resp.ok || resp.status < 500) {
-      logs.push(`[SSL] ✓ HTTPS connection successful (${resp.status})`);
+      const g = `[SSL] ✓ HTTPS connection successful (${resp.status})`;
+      logs.push(g);
+      onProgress?.(g, 30);
     }
 
+    onProgress?.('[SSL] Analyzing certificate chain and validity...', 40);
     try {
       const sslResp = await fetch(`https://ssl-checker.io/api/v1/check/${domain.replace(/^https?:\/\//, '')}`);
       const sslText = await sslResp.text();
@@ -655,44 +882,70 @@ async function scanSSL(domain: string) {
           sslInfo.issuer = r.issuer || 'Unknown';
           sslInfo.expiry = r.valid_till || r.not_after || 'Unknown';
           sslInfo.protocol = r.protocol || 'TLS 1.2+';
-          logs.push(`[SSL] Certificate: ${sslInfo.subject}`);
-          logs.push(`[SSL] Issuer: ${sslInfo.issuer}`);
-          logs.push(`[SSL] Expires: ${sslInfo.expiry}`);
+
+          const m1 = `[SSL] Certificate: ${sslInfo.subject}`;
+          const m2 = `[SSL] Issuer: ${sslInfo.issuer}`;
+          const m3 = `[SSL] Expires: ${sslInfo.expiry}`;
+          logs.push(m1, m2, m3);
+          onProgress?.(m1, 60);
+          onProgress?.(m2, 70);
+          onProgress?.(m3, 80);
+
           if (r.valid === false || r.expired) {
             sslInfo.issues.push('Certificate expired or invalid');
             sslInfo.grade = 'F';
-            logs.push('[SSL] ✗ Certificate is EXPIRED or INVALID');
+            const w = '[SSL] ✗ Certificate is EXPIRED or INVALID';
+            logs.push(w);
+            onProgress?.(w, 85);
           }
         }
-      } catch { logs.push('[SSL] Could not parse SSL checker response'); }
-    } catch { logs.push('[SSL] External SSL check unavailable'); }
+      } catch {
+        logs.push('[SSL] Could not parse SSL checker response');
+        onProgress?.('[SSL] Could not parse SSL checker response', 80);
+      }
+    } catch {
+      logs.push('[SSL] External SSL check unavailable');
+      onProgress?.('[SSL] External SSL check unavailable', 80);
+    }
 
     if (sslInfo.grade === 'Unknown') {
       sslInfo.grade = 'B+';
-      logs.push('[SSL] ✓ HTTPS works correctly');
-      logs.push('[SSL] Grade: B+ (based on successful HTTPS connection)');
+      const g1 = '[SSL] ✓ HTTPS works correctly';
+      const g2 = '[SSL] Grade: B+ (based on successful HTTPS connection)';
+      logs.push(g1, g2);
+      onProgress?.(g1, 90);
+      onProgress?.(g2, 95);
     }
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : 'unknown';
     if (errMsg.includes('certificate') || errMsg.includes('SSL') || errMsg.includes('TLS')) {
       sslInfo.grade = 'F';
       sslInfo.issues.push(`SSL/TLS error: ${errMsg}`);
-      logs.push(`[SSL] ✗ SSL ERROR: ${errMsg}`);
+      const w = `[SSL] ✗ SSL ERROR: ${errMsg}`;
+      logs.push(w);
+      onProgress?.(w, 90);
     } else {
-      logs.push(`[SSL] Connection failed: ${errMsg}`);
+      const w = `[SSL] Connection failed: ${errMsg}`;
+      logs.push(w);
+      onProgress?.(w, 70);
       try {
         const httpResp = await fetch(`http://${domain.replace(/^https?:\/\//, '')}`);
         await httpResp.text();
         sslInfo.grade = 'F';
         sslInfo.issues.push('Site accessible via HTTP only');
-        logs.push('[SSL] ✗ No HTTPS available');
+        const w2 = '[SSL] ✗ No HTTPS available';
+        logs.push(w2);
+        onProgress?.(w2, 85);
       } catch {
-        logs.push('[SSL] Target not reachable');
+        const w2 = '[SSL] Target not reachable';
+        logs.push(w2);
+        onProgress?.(w2, 85);
         sslInfo.grade = 'N/A';
       }
     }
   }
 
+  onProgress?.('[SSL] SSL/TLS configuration analysis complete.', 100);
   return { logs, sslInfo };
 }
 
@@ -712,31 +965,54 @@ async function probePort(domain: string, port: number, service: string): Promise
   } catch { return null; }
 }
 
-async function scanPorts(domain: string) {
+async function scanPorts(domain: string, onProgress?: ProgressCallback) {
   const logs: string[] = [];
   const openPorts: { port: number; service: string; version: string; state: string }[] = [];
-  logs.push(`[PORTS] Probing ${COMMON_PORTS.length} ports...`);
+  
+  const m = `[PORTS] Probing ${COMMON_PORTS.length} ports...`;
+  logs.push(m);
+  onProgress?.(m, 10);
 
   // Batch ports to avoid too many concurrent
-  for (const batch of chunkArray(COMMON_PORTS, 10)) {
+  const batches = chunkArray(COMMON_PORTS, 10);
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const pct = Math.round(10 + (i / batches.length) * 80);
+    onProgress?.(`[PORTS] Scanning ports batch ${i+1}/${batches.length}...`, pct);
     const results = await Promise.all(batch.map(p => probePort(domain, p.port, p.service)));
     for (const r of results) {
       if (r) {
         openPorts.push(r);
-        logs.push(`[PORTS] ✓ OPEN: port ${r.port} (${r.service}) — ${r.version}`);
+        const msg = `[PORTS] ✓ OPEN: port ${r.port} (${r.service}) — ${r.version}`;
+        logs.push(msg);
+        onProgress?.(msg, pct);
       }
     }
   }
 
-  if (openPorts.length === 0) logs.push('[PORTS] No open web service ports detected');
-  else logs.push(`[PORTS] ${openPorts.length} open port(s) found`);
+  if (openPorts.length === 0) {
+    const msg = '[PORTS] No open web service ports detected';
+    logs.push(msg);
+    onProgress?.(msg, 95);
+  } else {
+    const msg = `[PORTS] ${openPorts.length} open port(s) found`;
+    logs.push(msg);
+    onProgress?.(msg, 95);
+  }
 
   const riskyPorts = openPorts.filter(p => [5432, 3306, 6379, 27017, 9200, 8888, 10000, 3000, 5000, 8000, 9090].includes(p.port));
   if (riskyPorts.length > 0) {
-    logs.push(`[PORTS] ⚠️ ${riskyPorts.length} potentially risky service(s) exposed`);
-    for (const rp of riskyPorts) logs.push(`[PORTS]   WARNING: Port ${rp.port} (${rp.service})`);
+    const w = `[PORTS] ⚠️ ${riskyPorts.length} potentially risky service(s) exposed`;
+    logs.push(w);
+    onProgress?.(w, 98);
+    for (const rp of riskyPorts) {
+      const w2 = `[PORTS]   WARNING: Port ${rp.port} (${rp.service})`;
+      logs.push(w2);
+      onProgress?.(w2, 99);
+    }
   }
 
+  onProgress?.('[PORTS] Port probing complete.', 100);
   return { logs, openPorts };
 }
 
@@ -816,7 +1092,7 @@ async function crawlUrl(url: string, domain: string, baseUrl: string) {
 }
 
 // EXPANDED: depth 2, 20 pages
-async function spiderTarget(domain: string): Promise<CrawlResult> {
+async function spiderTarget(domain: string, onProgress?: ProgressCallback): Promise<CrawlResult> {
   const logs: string[] = [];
   const baseUrl = `https://${domain}`;
   const visited = new Set<string>();
@@ -825,16 +1101,22 @@ async function spiderTarget(domain: string): Promise<CrawlResult> {
   const maxPages = 20;
   const maxDepth = 2;
 
-  logs.push('[SPIDER] Starting active URL crawling...');
-  logs.push(`[SPIDER] Target: ${baseUrl}`);
-  logs.push(`[SPIDER] Max depth: ${maxDepth}, Max pages: ${maxPages}`);
+  const m1 = '[SPIDER] Starting active URL crawling...';
+  const m2 = `[SPIDER] Target: ${baseUrl}`;
+  const m3 = `[SPIDER] Max depth: ${maxDepth}, Max pages: ${maxPages}`;
+  logs.push(m1, m2, m3);
+  onProgress?.(m1, 5);
+  onProgress?.(m2, 7);
+  onProgress?.(m3, 10);
 
   let queue: { url: string; depth: number }[] = [{ url: baseUrl, depth: 0 }];
   const seedPaths = ['/', '/login', '/search', '/contact', '/api', '/sitemap.xml', '/about', '/register', '/signup', '/dashboard', '/admin', '/help'];
   for (const sp of seedPaths) queue.push({ url: `${baseUrl}${sp}`, depth: 0 });
 
   let pagesProcessed = 0;
+  onProgress?.('[SPIDER] Crawling seed URLs and discovering local links...', 15);
   while (queue.length > 0 && pagesProcessed < maxPages) {
+    const pct = Math.round(15 + (pagesProcessed / maxPages) * 70);
     const batch = queue.splice(0, 5);
     const newBatch = batch.filter(item => {
       const normalized = item.url.split('?')[0];
@@ -850,7 +1132,9 @@ async function spiderTarget(domain: string): Promise<CrawlResult> {
       if (!page) continue;
       pagesProcessed++;
       const depth = newBatch[i].depth;
-      logs.push(`[SPIDER] [depth:${depth}] Crawled: ${page.url} → ${page.links.length} links, ${page.forms.length} forms`);
+      const msg = `[SPIDER] [depth:${depth}] Crawled: ${page.url} → ${page.links.length} links, ${page.forms.length} forms`;
+      logs.push(msg);
+      onProgress?.(msg, pct);
       for (const p of page.params) allParams.set(`${p.path}:${p.param}`, p);
       for (const f of page.forms) allForms.push(f);
       if (depth < maxDepth) {
@@ -877,23 +1161,52 @@ async function spiderTarget(domain: string): Promise<CrawlResult> {
   logs.push(`[SPIDER] Parameters found: ${uniqueParams.length}`);
   logs.push(`[SPIDER] Forms discovered: ${uniqueForms.length}`);
 
+  onProgress?.(`[SPIDER] Crawl complete: ${pagesProcessed} pages, ${visited.size} URLs, ${uniqueParams.length} params, ${uniqueForms.length} forms`, 88);
+
   if (uniqueParams.length > 0) {
-    logs.push('[SPIDER] Discovered parameters:');
-    for (const p of uniqueParams.slice(0, 25)) logs.push(`[SPIDER]   ${p.param} → ${p.path}`);
-    if (uniqueParams.length > 25) logs.push(`[SPIDER]   ... and ${uniqueParams.length - 25} more`);
+    const msg = '[SPIDER] Discovered parameters:';
+    logs.push(msg);
+    onProgress?.(msg, 90);
+    for (const p of uniqueParams.slice(0, 25)) {
+      const inf = `[SPIDER]   ${p.param} → ${p.path}`;
+      logs.push(inf);
+      onProgress?.(inf, 91);
+    }
+    if (uniqueParams.length > 25) {
+      const inf = `[SPIDER]   ... and ${uniqueParams.length - 25} more`;
+      logs.push(inf);
+      onProgress?.(inf, 92);
+    }
   }
   if (uniqueForms.length > 0) {
-    logs.push('[SPIDER] Discovered forms:');
-    for (const f of uniqueForms.slice(0, 15)) logs.push(`[SPIDER]   ${f.method} ${f.action} [${f.fields.join(', ')}]`);
-    if (uniqueForms.length > 15) logs.push(`[SPIDER]   ... and ${uniqueForms.length - 15} more`);
+    const msg = '[SPIDER] Discovered forms:';
+    logs.push(msg);
+    onProgress?.(msg, 93);
+    for (const f of uniqueForms.slice(0, 15)) {
+      const inf = `[SPIDER]   ${f.method} ${f.action} [${f.fields.join(', ')}]`;
+      logs.push(inf);
+      onProgress?.(inf, 94);
+    }
+    if (uniqueForms.length > 15) {
+      const inf = `[SPIDER]   ... and ${uniqueForms.length - 15} more`;
+      logs.push(inf);
+      onProgress?.(inf, 95);
+    }
   }
 
   const loginForms = uniqueForms.filter(f => f.fields.some(field => /password|passwd|pass/i.test(field)));
   if (loginForms.length > 0) {
-    logs.push(`[SPIDER] ⚠️ ${loginForms.length} login/authentication form(s) discovered`);
-    for (const lf of loginForms) logs.push(`[SPIDER]   ${lf.method} ${lf.action} [${lf.fields.join(', ')}]`);
+    const w = `[SPIDER] ⚠️ ${loginForms.length} login/authentication form(s) discovered`;
+    logs.push(w);
+    onProgress?.(w, 98);
+    for (const lf of loginForms) {
+      const w2 = `[SPIDER]   ${lf.method} ${lf.action} [${lf.fields.join(', ')}]`;
+      logs.push(w2);
+      onProgress?.(w2, 99);
+    }
   }
 
+  onProgress?.('[SPIDER] Spider crawling complete.', 100);
   return { logs, discoveredUrls: Array.from(visited), discoveredParams: uniqueParams, discoveredForms: uniqueForms };
 }
 
@@ -974,7 +1287,7 @@ async function testPostInjection(baseUrl: string, endpoint: string, fields: Reco
   } catch { /* skip */ }
 }
 
-async function testInjection(domain: string, crawlData?: { discoveredParams: { path: string; param: string }[]; discoveredForms: { action: string; method: string; fields: string[] }[] }) {
+async function testInjection(domain: string, crawlData?: { discoveredParams: { path: string; param: string }[]; discoveredForms: { action: string; method: string; fields: string[] }[] }, onProgress?: ProgressCallback) {
   const logs: string[] = [];
   const findings: InjectionFinding[] = [];
   const baseUrl = `https://${domain.replace(/^https?:\/\//, '')}`;
@@ -999,14 +1312,20 @@ async function testInjection(domain: string, crawlData?: { discoveredParams: { p
     }
   }
 
-  logs.push('[INJECTION] Starting deep injection testing...');
-  logs.push(`[INJECTION] ${uniqueGetPaths.length} GET paths (${INJECTION_TEST_PATHS.length} static + ${crawledPaths.length} crawled)`);
-  logs.push(`[INJECTION] ${POST_TEST_ENDPOINTS.length + crawledFormTests.length} POST endpoints`);
-  logs.push(`[INJECTION] ${SQLI_PAYLOADS.length} SQLi + ${XSS_PAYLOADS.length} XSS payloads`);
-  logs.push('');
+  const m1 = '[INJECTION] Starting deep injection testing...';
+  const m2 = `[INJECTION] ${uniqueGetPaths.length} GET paths (${INJECTION_TEST_PATHS.length} static + ${crawledPaths.length} crawled)`;
+  const m3 = `[INJECTION] ${POST_TEST_ENDPOINTS.length + crawledFormTests.length} POST endpoints`;
+  const m4 = `[INJECTION] ${SQLI_PAYLOADS.length} SQLi + ${XSS_PAYLOADS.length} XSS payloads`;
+  logs.push(m1, m2, m3, m4, '');
+  onProgress?.(m1, 2);
+  onProgress?.(m2, 4);
+  onProgress?.(m3, 6);
+  onProgress?.(m4, 8);
 
   // Phase 1: GET fuzzing
-  logs.push('[INJECTION] ── Phase 1: GET Parameter Fuzzing ──');
+  const mPhase1 = '[INJECTION] ── Phase 1: GET Parameter Fuzzing ──';
+  logs.push(mPhase1);
+  onProgress?.(mPhase1, 10);
   const getTasks: Promise<void>[] = [];
   for (const path of uniqueGetPaths) {
     const param = path.match(/[?&](\w+)=/)?.[1] || 'unknown';
@@ -1019,11 +1338,18 @@ async function testInjection(domain: string, crawlData?: { discoveredParams: { p
       getTasks.push(testSingleInjection(testUrl, param, xss.payload, xss.name, 'xss', logs, findings));
     }
   }
-  for (const batch of chunkArray(getTasks, 12)) await Promise.all(batch);
+  const getBatches = chunkArray(getTasks, 12);
+  for (let i = 0; i < getBatches.length; i++) {
+    const pct = Math.round(10 + (i / getBatches.length) * 35);
+    onProgress?.(`[INJECTION] Running GET fuzzing batch ${i+1}/${getBatches.length}...`, pct);
+    await Promise.all(getBatches[i]);
+  }
 
   // Phase 2: POST fuzzing
   logs.push('');
-  logs.push('[INJECTION] ── Phase 2: POST Form Fuzzing ──');
+  const mPhase2 = '[INJECTION] ── Phase 2: POST Form Fuzzing ──';
+  logs.push(mPhase2);
+  onProgress?.(mPhase2, 45);
   const postTasks: Promise<void>[] = [];
   for (const endpoint of POST_TEST_ENDPOINTS) {
     for (const fieldSet of POST_FIELD_SETS) {
@@ -1035,12 +1361,19 @@ async function testInjection(domain: string, crawlData?: { discoveredParams: { p
       }
     }
   }
-  for (const batch of chunkArray(postTasks, 10)) await Promise.all(batch);
+  const postBatches = chunkArray(postTasks, 10);
+  for (let i = 0; i < postBatches.length; i++) {
+    const pct = Math.round(45 + (i / postBatches.length) * 25);
+    onProgress?.(`[INJECTION] Running POST fuzzing batch ${i+1}/${postBatches.length}...`, pct);
+    await Promise.all(postBatches[i]);
+  }
 
   // Phase 2b: Crawled form fuzzing
   if (crawledFormTests.length > 0) {
     logs.push('');
-    logs.push(`[INJECTION] ── Phase 2b: Crawled Form Fuzzing (${crawledFormTests.length} forms) ──`);
+    const mPhase2b = `[INJECTION] ── Phase 2b: Crawled Form Fuzzing (${crawledFormTests.length} forms) ──`;
+    logs.push(mPhase2b);
+    onProgress?.(mPhase2b, 70);
     const crawlPostTasks: Promise<void>[] = [];
     for (const cf of crawledFormTests) {
       for (const [fieldName] of Object.entries(cf.fields)) {
@@ -1054,12 +1387,19 @@ async function testInjection(domain: string, crawlData?: { discoveredParams: { p
         }
       }
     }
-    for (const batch of chunkArray(crawlPostTasks, 10)) await Promise.all(batch);
+    const crawlPostBatches = chunkArray(crawlPostTasks, 10);
+    for (let i = 0; i < crawlPostBatches.length; i++) {
+      const pct = Math.round(70 + (i / crawlPostBatches.length) * 15);
+      onProgress?.(`[INJECTION] Running crawled form fuzzing batch ${i+1}/${crawlPostBatches.length}...`, pct);
+      await Promise.all(crawlPostBatches[i]);
+    }
   }
 
   // Phase 3: Header injection
   logs.push('');
-  logs.push('[INJECTION] ── Phase 3: Header Injection ──');
+  const mPhase3 = '[INJECTION] ── Phase 3: Header Injection ──';
+  logs.push(mPhase3);
+  onProgress?.(mPhase3, 85);
   const headerPayloads = [
     { header: 'X-Forwarded-For', value: "127.0.0.1' OR '1'='1", name: 'XFF SQLi' },
     { header: 'Referer', value: '<script>alert(1)</script>', name: 'Referer XSS' },
@@ -1068,8 +1408,10 @@ async function testInjection(domain: string, crawlData?: { discoveredParams: { p
     { header: 'X-Custom-IP-Authorization', value: '127.0.0.1', name: 'IP Auth Bypass' },
     { header: 'X-Original-URL', value: '/admin', name: 'URL Override' },
   ];
-  await Promise.all(headerPayloads.map(async (hp) => {
+  await Promise.all(headerPayloads.map(async (hp, idx) => {
     try {
+      const pct = Math.round(85 + (idx / headerPayloads.length) * 10);
+      onProgress?.(`[INJECTION] Testing injected header: ${hp.header}...`, pct);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
       const resp = await fetch(baseUrl, { signal: controller.signal, headers: { [hp.header]: hp.value, 'User-Agent': 'VulnRadar/1.0.0' }, redirect: 'follow' });
@@ -1077,12 +1419,16 @@ async function testInjection(domain: string, crawlData?: { discoveredParams: { p
       const body = await resp.text();
       if (body.includes(hp.value)) {
         findings.push({ type: 'xss', payloadName: `Header: ${hp.name}`, url: baseUrl, param: hp.header, evidence: `${hp.header} value reflected`, severity: 'high' });
-        logs.push(`[INJECTION] ⚠️ HEADER REFLECTED: ${hp.name} via ${hp.header}`);
+        const w = `[INJECTION] ⚠️ HEADER REFLECTED: ${hp.name} via ${hp.header}`;
+        logs.push(w);
+        onProgress?.(w, pct);
       }
       for (const pattern of SQL_ERROR_PATTERNS) {
         if (pattern.test(body)) {
           findings.push({ type: 'sqli', payloadName: `Header: ${hp.name}`, url: baseUrl, param: hp.header, evidence: `SQL error via ${hp.header}`, severity: 'critical' });
-          logs.push(`[SQLi] ‼️ HEADER SQLi: ${hp.name} via ${hp.header}`);
+          const w = `[SQLi] ‼️ HEADER SQLi: ${hp.name} via ${hp.header}`;
+          logs.push(w);
+          onProgress?.(w, pct);
           break;
         }
       }
@@ -1108,6 +1454,7 @@ async function testInjection(domain: string, crawlData?: { discoveredParams: { p
   if (xssCount > 0) logs.push(`[XSS] ⚠️ ${xssCount} reflected XSS point(s)!`);
   else logs.push('[XSS] ✓ No reflected XSS detected');
 
+  onProgress?.(`[INJECTION] Complete. Findings: ${sqliCount} SQLi, ${xssCount} XSS`, 100);
   return { logs, findings: uniqueFindings };
 }
 
@@ -1119,14 +1466,17 @@ interface CorsFinding {
   evidence: string;
 }
 
-async function testCORS(domain: string) {
+async function testCORS(domain: string, onProgress?: ProgressCallback) {
   const logs: string[] = [];
   const findings: CorsFinding[] = [];
   const baseUrl = `https://${domain.replace(/^https?:\/\//, '')}`;
-  logs.push('[CORS] Starting CORS misconfiguration analysis...');
+  const m = '[CORS] Starting CORS misconfiguration analysis...';
+  logs.push(m);
+  onProgress?.(m, 10);
 
   // Test 1: evil.com origin
   try {
+    onProgress?.('[CORS] Testing arbitrary origin reflection (https://evil.com)...', 25);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': 'https://evil.com' } });
@@ -1135,57 +1485,73 @@ async function testCORS(domain: string) {
     const acac = resp.headers.get('access-control-allow-credentials');
     if (acao === '*' && acac === 'true') {
       findings.push({ type: 'credentials_wildcard', description: 'CORS allows any origin (*) WITH credentials', severity: 'critical', evidence: 'ACAO: *, ACAC: true' });
-      logs.push('[CORS] ‼️ CRITICAL: Wildcard origin with credentials!');
+      const w = '[CORS] ‼️ CRITICAL: Wildcard origin with credentials!';
+      logs.push(w);
+      onProgress?.(w, 35);
     } else if (acao === '*') {
       findings.push({ type: 'wildcard', description: 'CORS allows any origin (*)', severity: 'medium', evidence: 'Access-Control-Allow-Origin: *' });
-      logs.push('[CORS] ⚠️ Wildcard origin (*) detected');
+      const w = '[CORS] ⚠️ Wildcard origin (*) detected';
+      logs.push(w);
+      onProgress?.(w, 35);
     }
     if (acao === 'https://evil.com') {
       findings.push({ type: 'reflection', description: 'CORS reflects arbitrary Origin header', severity: 'critical', evidence: 'Sent Origin: https://evil.com, received same' });
-      logs.push('[CORS] ‼️ CRITICAL: Origin reflection detected!');
+      const w = '[CORS] ‼️ CRITICAL: Origin reflection detected!';
+      logs.push(w);
+      onProgress?.(w, 35);
     }
   } catch (e) { logs.push(`[CORS] Default test failed: ${e instanceof Error ? e.message : 'unknown'}`); }
 
   // Test 2: null origin
   try {
+    onProgress?.('[CORS] Testing null origin acceptance...', 45);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': 'null' } });
     clearTimeout(timeout);
     if (resp.headers.get('access-control-allow-origin') === 'null') {
       findings.push({ type: 'null_origin', description: 'CORS accepts "null" origin', severity: 'high', evidence: 'Sent Origin: null, received ACAO: null' });
-      logs.push('[CORS] ⚠️ Null origin accepted!');
+      const w = '[CORS] ⚠️ Null origin accepted!';
+      logs.push(w);
+      onProgress?.(w, 55);
     }
   } catch { /* skip */ }
 
   // Test 3: subdomain bypass
   try {
     const attackerOrigin = `https://attacker.${domain.replace(/^https?:\/\//, '')}`;
+    onProgress?.(`[CORS] Testing subdomain wildcard trust (${attackerOrigin})...`, 65);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': attackerOrigin } });
     clearTimeout(timeout);
     if (resp.headers.get('access-control-allow-origin') === attackerOrigin) {
       findings.push({ type: 'subdomain_bypass', description: 'CORS trusts arbitrary subdomains', severity: 'high', evidence: `Origin: ${attackerOrigin} accepted` });
-      logs.push(`[CORS] ⚠️ Subdomain wildcard trust: ${attackerOrigin} accepted`);
+      const w = `[CORS] ⚠️ Subdomain wildcard trust: ${attackerOrigin} accepted`;
+      logs.push(w);
+      onProgress?.(w, 75);
     }
   } catch { /* skip */ }
 
   // Test 4: HTTP scheme bypass
   try {
     const httpOrigin = `http://${domain.replace(/^https?:\/\//, '')}`;
+    onProgress?.(`[CORS] Testing insecure HTTP scheme trust (${httpOrigin})...`, 80);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(baseUrl, { signal: controller.signal, headers: { 'User-Agent': 'VulnRadar/1.0.0', 'Origin': httpOrigin } });
     clearTimeout(timeout);
     if (resp.headers.get('access-control-allow-origin') === httpOrigin) {
       findings.push({ type: 'insecure_scheme', description: 'CORS trusts HTTP origin on HTTPS site', severity: 'medium', evidence: `HTTPS site accepts HTTP origin: ${httpOrigin}` });
-      logs.push('[CORS] ⚠️ HTTP origin accepted on HTTPS site');
+      const w = '[CORS] ⚠️ HTTP origin accepted on HTTPS site';
+      logs.push(w);
+      onProgress?.(w, 85);
     }
   } catch { /* skip */ }
 
   // Test 5: Preflight
   try {
+    onProgress?.('[CORS] Testing preflight OPTIONS handling...', 90);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     const resp = await fetch(baseUrl, {
@@ -1195,7 +1561,11 @@ async function testCORS(domain: string) {
     clearTimeout(timeout);
     const allowMethods = resp.headers.get('access-control-allow-methods') || '';
     const allowHeaders = resp.headers.get('access-control-allow-headers') || '';
-    if (allowMethods.includes('*') || allowHeaders.includes('*')) logs.push('[CORS] ⚠️ Preflight allows wildcard methods/headers');
+    if (allowMethods.includes('*') || allowHeaders.includes('*')) {
+      const w = '[CORS] ⚠️ Preflight allows wildcard methods/headers';
+      logs.push(w);
+      onProgress?.(w, 95);
+    }
   } catch { /* skip */ }
 
   logs.push('');
@@ -1207,6 +1577,7 @@ async function testCORS(domain: string) {
     logs.push('[CORS] ✓ No CORS misconfigurations detected');
   }
 
+  onProgress?.('[CORS] CORS configuration analysis complete.', 100);
   return { logs, findings };
 }
 
@@ -1218,12 +1589,15 @@ interface OpenRedirectFinding {
   severity: 'high' | 'medium';
 }
 
-async function testOpenRedirects(domain: string) {
+async function testOpenRedirects(domain: string, onProgress?: ProgressCallback) {
   const logs: string[] = [];
   const findings: OpenRedirectFinding[] = [];
   const baseUrl = `https://${domain.replace(/^https?:\/\//, '')}`;
-  logs.push('[REDIRECT-VULN] Starting open redirect detection...');
-  logs.push(`[REDIRECT-VULN] Testing ${REDIRECT_ENDPOINTS.length} endpoints × ${REDIRECT_PARAMS.length} params × ${REDIRECT_TEST_PAYLOADS.length} payloads`);
+  const m1 = '[REDIRECT-VULN] Starting open redirect detection...';
+  const m2 = `[REDIRECT-VULN] Testing ${REDIRECT_ENDPOINTS.length} endpoints × ${REDIRECT_PARAMS.length} params × ${REDIRECT_TEST_PAYLOADS.length} payloads`;
+  logs.push(m1, m2);
+  onProgress?.(m1, 5);
+  onProgress?.(m2, 10);
 
   const tasks: Promise<void>[] = [];
   for (const endpoint of REDIRECT_ENDPOINTS) {
@@ -1240,7 +1614,9 @@ async function testOpenRedirects(domain: string) {
               const location = resp.headers.get('location') || '';
               if (location.includes('evil.com') || location.startsWith('javascript:') || location.startsWith('data:')) {
                 findings.push({ url: testUrl, param, redirectedTo: location, severity: 'high' });
-                logs.push(`[REDIRECT-VULN] ‼️ OPEN REDIRECT: ${endpoint}?${param} → ${location} (${pl.name})`);
+                const w = `[REDIRECT-VULN] ‼️ OPEN REDIRECT: ${endpoint}?${param} → ${location} (${pl.name})`;
+                logs.push(w);
+                onProgress?.(w, 50);
               }
             }
             if (resp.status === 200) {
@@ -1248,11 +1624,15 @@ async function testOpenRedirects(domain: string) {
               const metaRefresh = body.match(/meta\s+http-equiv=["']refresh["'][^>]*url=([^"'\s>]+)/i)?.[1] || '';
               if (metaRefresh.includes('evil.com')) {
                 findings.push({ url: testUrl, param, redirectedTo: `meta-refresh: ${metaRefresh}`, severity: 'medium' });
-                logs.push(`[REDIRECT-VULN] ⚠️ META REDIRECT: ${endpoint}?${param} → ${metaRefresh}`);
+                const w = `[REDIRECT-VULN] ⚠️ META REDIRECT: ${endpoint}?${param} → ${metaRefresh}`;
+                logs.push(w);
+                onProgress?.(w, 60);
               }
               if (body.includes('window.location') && body.includes(pl.payload)) {
                 findings.push({ url: testUrl, param, redirectedTo: 'JS redirect with payload', severity: 'high' });
-                logs.push(`[REDIRECT-VULN] ‼️ JS REDIRECT: ${endpoint}?${param}`);
+                const w = `[REDIRECT-VULN] ‼️ JS REDIRECT: ${endpoint}?${param}`;
+                logs.push(w);
+                onProgress?.(w, 70);
               }
             }
           } catch { /* skip */ }
@@ -1261,7 +1641,12 @@ async function testOpenRedirects(domain: string) {
     }
   }
 
-  for (const batch of chunkArray(tasks, 10)) await Promise.all(batch);
+  const batches = chunkArray(tasks, 10);
+  for (let i = 0; i < batches.length; i++) {
+    const pct = Math.round(10 + (i / batches.length) * 85);
+    onProgress?.(`[REDIRECT-VULN] Running redirect checks batch ${i+1}/${batches.length}...`, pct);
+    await Promise.all(batches[i]);
+  }
 
   const seen = new Set<string>();
   const uniqueFindings = findings.filter(f => {
@@ -1276,6 +1661,7 @@ async function testOpenRedirects(domain: string) {
   if (uniqueFindings.length > 0) logs.push(`[REDIRECT-VULN] ‼️ ${uniqueFindings.length} open redirect(s)!`);
   else logs.push('[REDIRECT-VULN] ✓ No open redirects detected');
 
+  onProgress?.('[REDIRECT-VULN] Open redirect vulnerability checks complete.', 100);
   return { logs, findings: uniqueFindings };
 }
 
@@ -1425,9 +1811,11 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let channel: any = null;
+
   try {
     const body = await req.json();
-    const { target, phase = 'all', crawlData }: ScanRequest = body;
+    const { target, phase = 'all', crawlData, scanId }: ScanRequest = body;
 
     if (!target) {
       return new Response(JSON.stringify({ success: false, error: 'Target is required' }),
@@ -1435,34 +1823,96 @@ Deno.serve(async (req) => {
     }
 
     const domain = target.replace(/^https?:\/\//, '').replace(/\/.*$/, '').trim();
-    console.log(`Scanning target: ${domain}, phase: ${phase}`);
+    console.log(`Scanning target: ${domain}, phase: ${phase}, scanId: ${scanId}`);
+
+    if (scanId) {
+      channel = supabase.channel(`scan:${scanId}`, {
+        config: {
+          broadcast: { self: true },
+        },
+      });
+      
+      // Wait for backend channel subscription to be ready to avoid dropping initial messages
+      await new Promise<void>((resolve) => {
+        let resolved = false;
+        const timer = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            resolve();
+          }
+        }, 3000);
+
+        channel.subscribe((status: string) => {
+          console.log(`Realtime channel status for scan:${scanId}: ${status}`);
+          if (status === 'SUBSCRIBED' && !resolved) {
+            clearTimeout(timer);
+            resolved = true;
+            resolve();
+          }
+        });
+      });
+    }
+
+    const broadcastProgress = (message: string, progress: number, currentPhase: string) => {
+      if (channel) {
+        channel.send({
+          type: 'broadcast',
+          event: 'progress',
+          payload: {
+            message,
+            progress: Math.min(100, Math.max(0, progress)),
+            phase: currentPhase,
+            timestamp: new Date().toISOString(),
+          },
+        }).catch((err: any) => console.error('Realtime broadcast error:', err));
+      }
+    };
 
     const allLogs: string[] = [];
-    allLogs.push(`[INIT] Target: ${domain}`);
-    allLogs.push(`[INIT] VulnRadar Engine v1.0.0 — Phase: ${phase}`);
-    allLogs.push(`[INIT] Started at ${new Date().toISOString()}`);
+    const logAndBroadcast = (msg: string, progress: number, currentPhase: string) => {
+      allLogs.push(msg);
+      broadcastProgress(msg, progress, currentPhase);
+    };
+
+    logAndBroadcast(`[INIT] Target: ${domain}`, 0, phase);
+    logAndBroadcast(`[INIT] VulnRadar Engine v1.0.0 — Phase: ${phase}`, 2, phase);
+    logAndBroadcast(`[INIT] Started at ${new Date().toISOString()}`, 4, phase);
     allLogs.push('');
 
     if (phase === 'recon') {
       // PHASE GROUP 1: DNS + Subdomains + Headers + Redirect
-      allLogs.push('[PHASE] DNS Reconnaissance...');
-      const dnsResult = await scanDNS(domain);
+      logAndBroadcast('[PHASE] DNS Reconnaissance...', 5, 'recon');
+      const dnsResult = await scanDNS(domain, (msg, pct) => {
+        const overallPct = Math.round((pct * 25) / 100);
+        logAndBroadcast(msg, overallPct, 'recon');
+      });
       allLogs.push(...dnsResult.logs);
       allLogs.push('');
 
-      allLogs.push('[PHASE] Subdomain Enumeration...');
-      const subdomainResult = await enumerateSubdomains(domain);
+      logAndBroadcast('[PHASE] Subdomain Enumeration...', 25, 'recon');
+      const subdomainResult = await enumerateSubdomains(domain, (msg, pct) => {
+        const overallPct = Math.round(25 + (pct * 25) / 100);
+        logAndBroadcast(msg, overallPct, 'recon');
+      });
       allLogs.push(...subdomainResult.logs);
       allLogs.push('');
 
-      allLogs.push('[PHASE] HTTP Security Headers...');
-      const headerResult = await scanHeaders(domain);
+      logAndBroadcast('[PHASE] HTTP Security Headers...', 50, 'recon');
+      const headerResult = await scanHeaders(domain, (msg, pct) => {
+        const overallPct = Math.round(50 + (pct * 25) / 100);
+        logAndBroadcast(msg, overallPct, 'recon');
+      });
       allLogs.push(...headerResult.logs);
       allLogs.push('');
 
-      allLogs.push('[PHASE] Redirect Chain Analysis...');
-      const redirectResult = await checkRedirectChain(domain);
+      logAndBroadcast('[PHASE] Redirect Chain Analysis...', 75, 'recon');
+      const redirectResult = await checkRedirectChain(domain, (msg, pct) => {
+        const overallPct = Math.round(75 + (pct * 25) / 100);
+        logAndBroadcast(msg, overallPct, 'recon');
+      });
       allLogs.push(...redirectResult.logs);
+
+      logAndBroadcast('[PHASE] Reconnaissance phase complete.', 100, 'recon');
 
       return new Response(JSON.stringify({
         success: true,
@@ -1479,24 +1929,38 @@ Deno.serve(async (req) => {
 
     } else if (phase === 'active') {
       // PHASE GROUP 2: Sensitive Files + SSL + Spider + Ports
-      allLogs.push('[PHASE] Sensitive File Check...');
-      const sensitiveResult = await scanSensitiveFiles(domain);
+      logAndBroadcast('[PHASE] Sensitive File Check...', 5, 'active');
+      const sensitiveResult = await scanSensitiveFiles(domain, (msg, pct) => {
+        const overallPct = Math.round((pct * 25) / 100);
+        logAndBroadcast(msg, overallPct, 'active');
+      });
       allLogs.push(...sensitiveResult.logs);
       allLogs.push('');
 
-      allLogs.push('[PHASE] SSL/TLS Analysis...');
-      const sslResult = await scanSSL(domain);
+      logAndBroadcast('[PHASE] SSL/TLS Analysis...', 25, 'active');
+      const sslResult = await scanSSL(domain, (msg, pct) => {
+        const overallPct = Math.round(25 + (pct * 25) / 100);
+        logAndBroadcast(msg, overallPct, 'active');
+      });
       allLogs.push(...sslResult.logs);
       allLogs.push('');
 
-      allLogs.push('[PHASE] URL Spider/Crawler...');
-      const crawlResult = await spiderTarget(domain);
+      logAndBroadcast('[PHASE] URL Spider/Crawler...', 50, 'active');
+      const crawlResult = await spiderTarget(domain, (msg, pct) => {
+        const overallPct = Math.round(50 + (pct * 25) / 100);
+        logAndBroadcast(msg, overallPct, 'active');
+      });
       allLogs.push(...crawlResult.logs);
       allLogs.push('');
 
-      allLogs.push('[PHASE] Port Probing...');
-      const portResult = await scanPorts(domain);
+      logAndBroadcast('[PHASE] Port Probing...', 75, 'active');
+      const portResult = await scanPorts(domain, (msg, pct) => {
+        const overallPct = Math.round(75 + (pct * 25) / 100);
+        logAndBroadcast(msg, overallPct, 'active');
+      });
       allLogs.push(...portResult.logs);
+
+      logAndBroadcast('[PHASE] Active scanning phase complete.', 100, 'active');
 
       return new Response(JSON.stringify({
         success: true,
@@ -1511,7 +1975,6 @@ Deno.serve(async (req) => {
             paramsFound: crawlResult.discoveredParams.length,
             formsFound: crawlResult.discoveredForms.length,
           },
-          // Pass crawl data for the attack phase
           crawlData: {
             discoveredParams: crawlResult.discoveredParams,
             discoveredForms: crawlResult.discoveredForms,
@@ -1521,19 +1984,30 @@ Deno.serve(async (req) => {
 
     } else if (phase === 'attack') {
       // PHASE GROUP 3: Injection + CORS + Open Redirect
-      allLogs.push('[PHASE] Injection Testing (SQLi/XSS)...');
-      const injectionResult = await testInjection(domain, crawlData);
+      logAndBroadcast('[PHASE] Injection Testing (SQLi/XSS)...', 5, 'attack');
+      const injectionResult = await testInjection(domain, crawlData, (msg, pct) => {
+        const overallPct = Math.round((pct * 40) / 100);
+        logAndBroadcast(msg, overallPct, 'attack');
+      });
       allLogs.push(...injectionResult.logs);
       allLogs.push('');
 
-      allLogs.push('[PHASE] CORS Misconfiguration Testing...');
-      const corsResult = await testCORS(domain);
+      logAndBroadcast('[PHASE] CORS Misconfiguration Testing...', 40, 'attack');
+      const corsResult = await testCORS(domain, (msg, pct) => {
+        const overallPct = Math.round(40 + (pct * 30) / 100);
+        logAndBroadcast(msg, overallPct, 'attack');
+      });
       allLogs.push(...corsResult.logs);
       allLogs.push('');
 
-      allLogs.push('[PHASE] Open Redirect Detection...');
-      const openRedirectResult = await testOpenRedirects(domain);
+      logAndBroadcast('[PHASE] Open Redirect Detection...', 70, 'attack');
+      const openRedirectResult = await testOpenRedirects(domain, (msg, pct) => {
+        const overallPct = Math.round(70 + (pct * 30) / 100);
+        logAndBroadcast(msg, overallPct, 'attack');
+      });
       allLogs.push(...openRedirectResult.logs);
+
+      logAndBroadcast('[PHASE] Attack/Vulnerability scanning phase complete.', 100, 'attack');
 
       return new Response(JSON.stringify({
         success: true,
@@ -1547,32 +2021,69 @@ Deno.serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     } else {
-      // LEGACY 'all' mode — run everything (may hit limits on heavy targets)
-      const dnsResult = await scanDNS(domain);
+      // LEGACY 'all' mode
+      logAndBroadcast('[PHASE] Starting full vulnerability scan...', 2, 'all');
+
+      const dnsResult = await scanDNS(domain, (msg, pct) => {
+        logAndBroadcast(msg, Math.round((pct * 9) / 100), 'all');
+      });
       allLogs.push(...dnsResult.logs, '');
-      const subdomainResult = await enumerateSubdomains(domain);
+
+      const subdomainResult = await enumerateSubdomains(domain, (msg, pct) => {
+        logAndBroadcast(msg, Math.round(9 + (pct * 9) / 100), 'all');
+      });
       allLogs.push(...subdomainResult.logs, '');
-      const headerResult = await scanHeaders(domain);
+
+      const headerResult = await scanHeaders(domain, (msg, pct) => {
+        logAndBroadcast(msg, Math.round(18 + (pct * 9) / 100), 'all');
+      });
       allLogs.push(...headerResult.logs, '');
-      const redirectResult = await checkRedirectChain(domain);
+
+      const redirectResult = await checkRedirectChain(domain, (msg, pct) => {
+        logAndBroadcast(msg, Math.round(27 + (pct * 9) / 100), 'all');
+      });
       allLogs.push(...redirectResult.logs, '');
-      const sensitiveResult = await scanSensitiveFiles(domain);
+
+      const sensitiveResult = await scanSensitiveFiles(domain, (msg, pct) => {
+        logAndBroadcast(msg, Math.round(36 + (pct * 9) / 100), 'all');
+      });
       allLogs.push(...sensitiveResult.logs, '');
-      const sslResult = await scanSSL(domain);
+
+      const sslResult = await scanSSL(domain, (msg, pct) => {
+        logAndBroadcast(msg, Math.round(45 + (pct * 9) / 100), 'all');
+      });
       allLogs.push(...sslResult.logs, '');
-      const crawlResult = await spiderTarget(domain);
+
+      const crawlResult = await spiderTarget(domain, (msg, pct) => {
+        logAndBroadcast(msg, Math.round(54 + (pct * 9) / 100), 'all');
+      });
       allLogs.push(...crawlResult.logs, '');
-      const portResult = await scanPorts(domain);
+
+      const portResult = await scanPorts(domain, (msg, pct) => {
+        logAndBroadcast(msg, Math.round(63 + (pct * 9) / 100), 'all');
+      });
       allLogs.push(...portResult.logs, '');
-      const injectionResult = await testInjection(domain, crawlResult);
+
+      const injectionResult = await testInjection(domain, crawlResult, (msg, pct) => {
+        logAndBroadcast(msg, Math.round(72 + (pct * 9) / 100), 'all');
+      });
       allLogs.push(...injectionResult.logs, '');
-      const corsResult = await testCORS(domain);
+
+      const corsResult = await testCORS(domain, (msg, pct) => {
+        logAndBroadcast(msg, Math.round(81 + (pct * 9) / 100), 'all');
+      });
       allLogs.push(...corsResult.logs, '');
-      const openRedirectResult = await testOpenRedirects(domain);
+
+      const openRedirectResult = await testOpenRedirects(domain, (msg, pct) => {
+        logAndBroadcast(msg, Math.round(90 + (pct * 9) / 100), 'all');
+      });
       allLogs.push(...openRedirectResult.logs, '');
 
+      logAndBroadcast('Generating final vulnerability report...', 99, 'all');
       const vulns = generateVulnerabilitiesFromFindings(headerResult, dnsResult, sslResult, sensitiveResult, redirectResult, portResult, injectionResult, corsResult, openRedirectResult, domain);
       for (const v of vulns) allLogs.push(`[VULN] ${v.severity === 'critical' ? '‼️' : v.severity === 'high' ? '⚠️' : 'ℹ️'} ${v.severity.toUpperCase()}: ${v.title}`);
+
+      logAndBroadcast('Scan successfully completed!', 100, 'all');
 
       return new Response(JSON.stringify({
         success: true,
@@ -1593,5 +2104,13 @@ Deno.serve(async (req) => {
     console.error('Scan error:', error);
     return new Response(JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  } finally {
+    if (channel) {
+      try {
+        supabase.removeChannel(channel);
+      } catch (err) {
+        console.error('Error removing channel:', err);
+      }
+    }
   }
 });
