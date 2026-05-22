@@ -80,7 +80,7 @@ const ScanReport = ({ result }: ScanReportProps) => {
       <Tabs defaultValue="vulns" className="w-full">
         <TabsList className="bg-secondary border border-border w-full justify-start overflow-x-auto flex-wrap h-auto gap-1 p-1">
           <TabsTrigger value="vulns" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5 text-xs sm:text-sm">
-            <Shield className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Vulnerabilities</span><span className="sm:hidden">Vulns</span>
+            <Shield className="w-3.5 h-3.5" /> <span className="hidden md:inline">Vulnerabilities</span><span className="md:hidden">Vulns</span>
           </TabsTrigger>
           <TabsTrigger value="headers" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5 text-xs sm:text-sm">
             <Globe className="w-3.5 h-3.5" /> Headers
@@ -98,25 +98,25 @@ const ScanReport = ({ result }: ScanReportProps) => {
             <FileWarning className="w-3.5 h-3.5" /> Files
           </TabsTrigger>
           <TabsTrigger value="subdomains" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5 text-xs sm:text-sm">
-            <Search className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Subdomains</span><span className="sm:hidden">Subs</span>
+            <Search className="w-3.5 h-3.5" /> <span className="hidden md:inline">Subdomains</span><span className="md:hidden">Subs</span>
           </TabsTrigger>
           <TabsTrigger value="redirects" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5 text-xs sm:text-sm">
-            <ArrowRight className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Redirects</span><span className="sm:hidden">Redir</span>
+            <ArrowRight className="w-3.5 h-3.5" /> <span className="hidden md:inline">Redirects</span><span className="md:hidden">Redir</span>
           </TabsTrigger>
           <TabsTrigger value="ports" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5 text-xs sm:text-sm">
             <Plug className="w-3.5 h-3.5" /> Ports
           </TabsTrigger>
           <TabsTrigger value="injection" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5 text-xs sm:text-sm">
-            <Code className="w-3.5 h-3.5" /> <span className="hidden sm:inline">SQLi/XSS</span><span className="sm:hidden">Inject</span>
+            <Code className="w-3.5 h-3.5" /> <span className="hidden md:inline">SQLi/XSS</span><span className="md:hidden">Inject</span>
           </TabsTrigger>
           <TabsTrigger value="cors" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5 text-xs sm:text-sm">
             <Unlink className="w-3.5 h-3.5" /> CORS
           </TabsTrigger>
           <TabsTrigger value="openredirect" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5 text-xs sm:text-sm">
-            <ExternalLink className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Open Redirect</span><span className="sm:hidden">Redir</span>
+            <ExternalLink className="w-3.5 h-3.5" /> <span className="hidden md:inline">Open Redirect</span><span className="md:hidden">Redir</span>
           </TabsTrigger>
           <TabsTrigger value="ai" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary gap-1.5 text-xs sm:text-sm">
-            <Brain className="w-3.5 h-3.5" /> <span className="hidden sm:inline">AI Analysis</span><span className="sm:hidden">AI</span>
+            <Brain className="w-3.5 h-3.5" /> <span className="hidden md:inline">AI Analysis</span><span className="md:hidden">AI</span>
           </TabsTrigger>
         </TabsList>
 
