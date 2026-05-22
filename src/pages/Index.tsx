@@ -81,8 +81,8 @@ const Index = () => {
     }
   }, [target, addLog, toast]);
 
-  const openHistory = () => {
-    setHistory(getHistory());
+  const openHistory = async () => {
+    setHistory(await getHistory());
     setShowHistory(true);
     setCompareMode(false);
     setCompareScans([null, null]);
@@ -179,6 +179,51 @@ const Index = () => {
               </div>
             )}
 
+            {/* Stats Bar */}
+            {history.length > 0 && (() => {
+              const domainMap: Record<string, { count: number; last: Date }> = {};
+              history.forEach(s => {
+                const domain = s.result.target.replace(/https?:\/\//, '').split('/')[0];
+                if (!domainMap[domain]) {
+                  domainMap[domain] = { count: 0, last: new Date(s.timestamp) };
+                }
+                domainMap[domain].count += 1;
+                const d = new Date(s.timestamp);
+                if (d > domainMap[domain].last) domainMap[domain].last = d;
+              });
+
+              const timeAgo = (date: Date) => {
+                const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+                if (diff < 60) return 'just now';
+                if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+                if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+                return `${Math.floor(diff / 86400)}d ago`;
+              };
+
+              return (
+                <div className="rounded-md border border-border bg-card p-4 space-y-3 mb-2">
+                  <div className="flex items-center gap-2 text-sm font-mono text-muted-foreground">
+                    <span className="text-primary font-bold text-base">{history.length}</span>
+                    <span>total scans stored</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(domainMap).map(([domain, info]) => (
+                      <div
+                        key={domain}
+                        className="flex items-center gap-2 text-xs font-mono bg-secondary border border-border px-3 py-1.5 rounded-full"
+                      >
+                        <span className="text-primary font-bold">{domain}</span>
+                        <span className="text-muted-foreground">·</span>
+                        <span className="text-foreground">{info.count}x scanned</span>
+                        <span className="text-muted-foreground">·</span>
+                        <span className="text-muted-foreground">last {timeAgo(info.last)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+            
             {history.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground text-sm">
                 No scans saved yet. Run a scan to see it here.
