@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import TerminalOutput from '@/components/TerminalOutput';
 import ScanProgress from '@/components/ScanProgress';
 import ScanReport from '@/components/ScanReport';
+import ScanSkeleton from '@/components/ScanSkeleton';
 import ScanComparison from '@/components/ScanComparison';
 import { type ScanResult, SCAN_PHASES } from '@/lib/scanner-data';
 import { performRealScan } from '@/lib/scanner-api';
@@ -102,13 +103,8 @@ const Index = () => {
   }, [target, addLog, toast]);
 
   const openHistory = async () => {
-<<<<<<< HEAD
-    const historyData = await getHistory();
-    setHistory(historyData);
-=======
     const scans = await getHistory();
     setHistory(scans);
->>>>>>> e914b8e (Fix async history handling and resolve merge conflicts)
     setShowHistory(true);
     setCompareMode(false);
     setCompareScans([null, null]);
@@ -148,13 +144,8 @@ const Index = () => {
           </div>
           <div className="flex items-center gap-5">
             <button
-<<<<<<< HEAD
-            onClick={openHistory}
-            className="flex items-center gap-2 text-sm font-mono text-muted-foreground hover:text-foreground transition-all duration-300 ease-in-out hover:-translate-y-1 hover:bg-secondary hover:shadow-md px-3 py-2 rounded-md border border-transparent hover:border-border"
-=======
               onClick={openHistory}
               className="flex items-center gap-2 text-sm font-mono text-muted-foreground hover:text-foreground transition-all duration-300 ease-in-out hover:-translate-y-1 hover:bg-secondary hover:shadow-md px-3 py-2 rounded-md border border-transparent hover:border-border"
->>>>>>> e914b8e (Fix async history handling and resolve merge conflicts)
             >
               <History className="w-4 h-4" />
               <span>History</span>
@@ -226,13 +217,8 @@ const Index = () => {
                   return (
                     <div className="group relative">
                       <button
-<<<<<<< HEAD
-                      onClick={() => compareMode ? selectForCompare(scan) : loadScan(scan)}
-                      className="w-full text-left p-4 rounded-md border border-border bg-card hover:border-primary/50 hover:bg-secondary/50 transition-all duration-300 ease-in-out hover:-translate-y-1 hover:shadow-lg"
-=======
                         onClick={() => compareMode ? selectForCompare(scan) : loadScan(scan)}
                         className="w-full text-left p-4 rounded-md border border-border bg-card hover:border-primary/50 hover:bg-secondary/50 transition-all duration-300 ease-in-out hover:-translate-y-1 hover:shadow-lg"
->>>>>>> e914b8e (Fix async history handling and resolve merge conflicts)
                       >
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-sm font-mono text-primary truncate mr-8">{scan.result.target}</span>
@@ -442,5 +428,4 @@ const Index = () => {
     </div>
   );
 };
-
 export default Index;
