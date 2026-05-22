@@ -25,6 +25,7 @@ const Index = () => {
   const [logs, setLogs] = useState<string[]>([]);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const [urlError, setUrlError] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<StoredScan[]>([]);
   const [compareMode, setCompareMode] = useState(false);
@@ -37,8 +38,28 @@ const Index = () => {
     setLogs([...logsRef.current]);
   }, []);
 
+
+  const validateTarget = (value: string): boolean => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setUrlError('Please enter a domain to scan.');
+      return false;
+    }
+    if (trimmed.includes(' ')) {
+      setUrlError('Domain cannot contain spaces.');
+      return false;
+    }
+    const domainRegex = /^(https?:\/\/)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(\/.*)?$/;
+    if (!domainRegex.test(trimmed)) {
+      setUrlError('Please enter a valid domain e.g. example.com');
+      return false;
+    }
+    setUrlError('');
+    return true;
+  };
+
   const startScan = useCallback(async () => {
-    if (!target.trim()) return;
+    if (!validateTarget(target)) return;
 
     setScanState('scanning');
     setCurrentPhaseIndex(0);
@@ -71,7 +92,7 @@ const Index = () => {
 
       setResult(scanResult);
       setScanState('complete');
-      saveScan(scanResult);
+      await saveScan(scanResult);
       toast({ title: 'Scan Complete', description: `Found ${scanResult.vulnerabilities.length} findings for ${target}` });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Scan failed';
@@ -81,8 +102,9 @@ const Index = () => {
     }
   }, [target, addLog, toast]);
 
-  const openHistory = () => {
-    setHistory(getHistory());
+  const openHistory = async () => {
+    const scans = await getHistory();
+    setHistory(scans);
     setShowHistory(true);
     setCompareMode(false);
     setCompareScans([null, null]);
@@ -122,8 +144,8 @@ const Index = () => {
           </div>
           <div className="flex items-center gap-5">
             <button
-            onClick={openHistory}
-            className="flex items-center gap-2 text-sm font-mono text-muted-foreground hover:text-foreground transition-all duration-300 ease-in-out hover:-translate-y-1 hover:bg-secondary hover:shadow-md px-3 py-2 rounded-md border border-transparent hover:border-border"
+              onClick={openHistory}
+              className="flex items-center gap-2 text-sm font-mono text-muted-foreground hover:text-foreground transition-all duration-300 ease-in-out hover:-translate-y-1 hover:bg-secondary hover:shadow-md px-3 py-2 rounded-md border border-transparent hover:border-border"
             >
               <History className="w-4 h-4" />
               <span>History</span>
@@ -157,7 +179,11 @@ const Index = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => { clearHistory(); setHistory([]); toast({ title: 'History cleared' }); }}
+                  onClick={async () => {
+                    await clearHistory();
+                    setHistory([]);
+                    toast({ title: 'History cleared' });
+                  }}
                   className="gap-1.5 text-xs"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Clear
@@ -191,8 +217,8 @@ const Index = () => {
                   return (
                     <div className="group relative">
                       <button
-                      onClick={() => compareMode ? selectForCompare(scan) : loadScan(scan)}
-                      className="w-full text-left p-4 rounded-md border border-border bg-card hover:border-primary/50 hover:bg-secondary/50 transition-all duration-300 ease-in-out hover:-translate-y-1 hover:shadow-lg"
+                        onClick={() => compareMode ? selectForCompare(scan) : loadScan(scan)}
+                        className="w-full text-left p-4 rounded-md border border-border bg-card hover:border-primary/50 hover:bg-secondary/50 transition-all duration-300 ease-in-out hover:-translate-y-1 hover:shadow-lg"
                       >
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-sm font-mono text-primary truncate mr-8">{scan.result.target}</span>
@@ -204,7 +230,7 @@ const Index = () => {
                           <span className="text-muted-foreground">SSL: {scan.result.sslInfo.grade}</span>
                         </div>
                       </button>
-                      
+
                       <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -274,11 +300,17 @@ const Index = () => {
                 <Crosshair className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
                   value={target}
-                  onChange={e => setTarget(e.target.value)}
+                  onChange={e => { setTarget(e.target.value); setUrlError(''); }}
                   onKeyDown={e => e.key === 'Enter' && startScan()}
                   placeholder="Enter target domain (e.g., example.com)"
                   className="pl-10 h-12 bg-secondary border-border font-mono text-sm text-foreground placeholder:text-muted-foreground transition-all duration-300 ease-in-out focus:border-primary focus:ring-2 focus:ring-primary/30 focus:shadow-lg"
-                  />
+                />
+
+                {urlError && (
+                  <p className="text-sm text-destructive font-mono mt-1 flex items-center gap-1">
+                    <span>⚠</span> {urlError}
+                  </p>
+                )}
               </div>
               <Button
                 onClick={startScan}
@@ -396,5 +428,4 @@ const Index = () => {
     </div>
   );
 };
-
 export default Index;
