@@ -114,9 +114,67 @@ export async function clearHistory(): Promise<void> {
 // Fallback mechanisms for when Supabase table isn't created yet
 function saveToLocalStorage(entry: StoredScan) {
   const history = getFromLocalStorage();
+
   history.unshift(entry);
-  if (history.length > 20) history.pop();
-  localStorage.setItem('vulnradar_history', JSON.stringify(history));
+
+  if (history.length > 20) {
+    history.pop();
+  }
+
+  try {
+    localStorage.setItem(
+      'vulnradar_history',
+      JSON.stringify(history)
+    );
+  } catch (err) {
+    if (
+  err instanceof DOMException &&
+  err.name === 'QuotaExceededError'
+) {
+    console.warn(
+      'Local storage quota exceeded. Trimming old scan history.'
+    );
+
+    let recovered = false;
+
+    // Remove oldest entries until storage succeeds
+    while (history.length > 1) {
+        history.pop();
+
+        try {
+          localStorage.setItem(
+            'vulnradar_history',
+            JSON.stringify(history)
+          );
+
+          console.info(
+            'Recovered by trimming old scan history.'
+          );
+
+          recovered = true;
+          break;
+        } catch (retryErr) {
+          if (
+            !(
+              retryErr instanceof DOMException &&
+              retryErr.name === 'QuotaExceededError'
+            )
+          ) {
+            throw retryErr;
+          }
+        }
+      }
+
+      // Recovery failed completely
+      if (!recovered) {
+        throw new Error(
+          'Unable to recover from localStorage quota exceeded error.'
+        );
+      }
+  } else {
+    throw err;
+    }
+  }
 }
 
 function getFromLocalStorage(): StoredScan[] {

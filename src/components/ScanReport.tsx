@@ -2,10 +2,10 @@ import { ScanResult } from '@/lib/scanner-data';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import VulnerabilityCard from './VulnerabilityCard';
 import AiAnalysis from './AiAnalysis';
-import { Shield, Globe, Lock, Server, Cpu, Network, FileWarning, ArrowRight, Search, Plug, Code, Unlink, ExternalLink, Brain, Download, FileJson, FileText, FileSpreadsheet } from 'lucide-react';
+import { Shield, Globe, Lock, Server, Cpu, Network, FileWarning, ArrowRight, Search, Plug, Code, Unlink, ExternalLink, Brain, Download, FileJson, FileText, FileSpreadsheet, FileCode, File } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { exportToJson, exportToCsv, exportToPdf } from '@/lib/export-utils';
+import { exportToJson, exportToCsv, exportToPdf, exportToMarkdown, exportToXml } from '@/lib/export-utils';
 
 interface ScanReportProps {
   result: ScanResult;
@@ -41,6 +41,12 @@ const ScanReport = ({ result }: ScanReportProps) => {
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => exportToCsv(result)} className="gap-2 cursor-pointer">
               <FileSpreadsheet className="w-4 h-4" /> Export as CSV
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportToMarkdown(result)} className="gap-2 cursor-pointer">
+              <File className="w-4 h-4" /> Export as Markdown
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportToXml(result)} className="gap-2 cursor-pointer">
+              <FileCode className="w-4 h-4" /> Export as XML
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
