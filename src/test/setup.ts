@@ -14,20 +14,11 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => {},
   }),
 });
-// Mock Supabase client globally to avoid environment key errors during tests
-// Forces fallback paths so that localStorage assertions in tests pass successfully
+// Mock Supabase client exports to avoid environment key errors during tests
+// Provide `getSupabase` that returns null so code paths fall back to localStorage
 vi.mock("@/integrations/supabase/client", () => ({
-  supabase: {
-    from: vi.fn(() => ({
-      insert: vi.fn().mockResolvedValue({ error: new Error("Supabase DB not configured in test environment") }),
-      select: vi.fn(() => ({
-        order: vi.fn(() => ({
-          limit: vi.fn().mockResolvedValue({ data: null, error: new Error("Supabase DB not configured in test environment") }),
-        })),
-      })),
-      delete: vi.fn(() => ({
-        neq: vi.fn().mockResolvedValue({ error: new Error("Supabase DB not configured in test environment") }),
-      })),
-    })),
+  getSupabase: () => null,
+  requireSupabase: () => {
+    throw new Error('Supabase is not configured in test environment');
   },
 }));

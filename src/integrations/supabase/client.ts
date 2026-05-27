@@ -13,7 +13,7 @@ function createSupabase() {
   return createClient<Database>(SUPABASE_URL as string, SUPABASE_PUBLISHABLE_KEY as string, {
     auth: {
       // Only set storage when available (avoids Node/test runtime errors)
-      storage: storage as any,
+      storage: storage as unknown as Storage | undefined,
       persistSession: true,
       autoRefreshToken: true,
     },
