@@ -31,7 +31,7 @@ const Index = () => {
   const [compareScans, setCompareScans] = useState<[ScanResult | null, ScanResult | null]>([null, null]);
   const { toast } = useToast();
   const logsRef = useRef<string[]>([]);
-
+  const cancelRef = useRef<(() => void) | null>(null);
   const addLog = useCallback((log: string) => {
     logsRef.current = [...logsRef.current, log];
     setLogs([...logsRef.current]);
@@ -51,6 +51,9 @@ const Index = () => {
     setCompareMode(false);
 
     try {
+      let cancelled = false;
+      cancelRef.current = () => { cancelled = true; };
+
       const scanResult = await performRealScan(
         target.trim(),
         addLog,
@@ -59,6 +62,12 @@ const Index = () => {
           setPhaseProgress(progress);
         }
       );
+
+      if (cancelled) {
+        setScanState('idle');
+        setLogs([]);
+        return;
+      }
 
       setResult(scanResult);
       setScanState('complete');
@@ -125,8 +134,8 @@ const Index = () => {
           </div>
           <div className="flex items-center gap-5">
             <button
-              onClick={openHistory}
-              className="flex items-center gap-2 text-sm font-mono text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-md hover:bg-secondary border border-transparent hover:border-border"
+            onClick={openHistory}
+            className="flex items-center gap-2 text-sm font-mono text-muted-foreground hover:text-foreground transition-all duration-300 ease-in-out hover:-translate-y-1 hover:bg-secondary hover:shadow-md px-3 py-2 rounded-md border border-transparent hover:border-border"
             >
               <History className="w-4 h-4" />
               <span>History</span>
@@ -194,8 +203,8 @@ const Index = () => {
                   return (
                     <div className="group relative">
                       <button
-                        onClick={() => compareMode ? selectForCompare(scan) : loadScan(scan)}
-                        className="w-full text-left p-4 rounded-md border border-border bg-card hover:border-primary/50 hover:bg-secondary/50 transition-all"
+                      onClick={() => compareMode ? selectForCompare(scan) : loadScan(scan)}
+                      className="w-full text-left p-4 rounded-md border border-border bg-card hover:border-primary/50 hover:bg-secondary/50 transition-all duration-300 ease-in-out hover:-translate-y-1 hover:shadow-lg"
                       >
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-sm font-mono text-primary truncate mr-8">{scan.result.target}</span>
@@ -280,8 +289,8 @@ const Index = () => {
                   onChange={e => setTarget(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && startScan()}
                   placeholder="Enter target domain (e.g., example.com)"
-                  className="pl-10 h-12 bg-secondary border-border font-mono text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-primary/30"
-                />
+                  className="pl-10 h-12 bg-secondary border-border font-mono text-sm text-foreground placeholder:text-muted-foreground transition-all duration-300 ease-in-out focus:border-primary focus:ring-2 focus:ring-primary/30 focus:shadow-lg"
+                  />
               </div>
               <Button
                 onClick={startScan}
@@ -330,9 +339,26 @@ const Index = () => {
                 <h2 className="text-lg sm:text-xl font-bold text-foreground">Live Scanning</h2>
                 <p className="text-sm font-mono text-primary">{target}</p>
               </div>
-              <div className="text-xs font-mono text-muted-foreground animate-pulse flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                Phase {Math.min(currentPhaseIndex + 1, SCAN_PHASES.length)}/{SCAN_PHASES.length}
+              <div className="flex items-center gap-3">
+                <div className="text-xs font-mono text-muted-foreground animate-pulse flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                  Phase {Math.min(currentPhaseIndex + 1, SCAN_PHASES.length)}/{SCAN_PHASES.length}
+                </div>
+                <Button
+                  onClick={() => {
+                    if (cancelRef.current) cancelRef.current();
+                    setScanState('idle');
+                    setLogs([]);
+                    setTarget('');
+                    addLog('⚠ Scan cancelled by user.');
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 border-destructive/50 text-destructive hover:bg-destructive/10 hover:border-destructive hover:text-white"
+                >
+                  <span className="w-2 h-2 rounded-full bg-destructive" />
+                  Cancel Scan
+                </Button>
               </div>
             </div>
 

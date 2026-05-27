@@ -1,14 +1,31 @@
 import { getSupabase } from '@/integrations/supabase/client';
-import type { ScanResult, Vulnerability, InjectionFinding, CorsFinding, OpenRedirectFinding } from '@/lib/scanner-data';
+import type { ScanResult, Vulnerability } from '@/lib/scanner-data';
+import type {
+  CrawlData,
+  DNSRecord,
+  SecurityHeader,
+  Technology,
+  RedirectChainEntry,
+  ExposedFile,
+  OpenPort,
+  SSLInfo,
+  ScanResponse,
+  ReconData,
+  ActiveData,
+  AttackData,
+  InjectionFinding,
+  CorsFinding,
+  OpenRedirectFinding
+} from '../../supabase/functions/scan-target/types/scan';
 
 // Client-side vulnerability generation from merged phase data
 function generateVulnerabilities(data: {
-  headers: { name: string; value: string; status: string }[];
-  dnsRecords: { type: string; value: string }[];
+  headers: SecurityHeader[];
+  dnsRecords: DNSRecord[];
   sslInfo: { grade: string; issues: string[] };
-  sensitiveFiles: { path: string; name: string; status: number; severity: string }[];
-  redirectChain: { url: string; status: number }[];
-  openPorts: { port: number; service: string }[];
+  sensitiveFiles: ExposedFile[];
+  redirectChain: RedirectChainEntry[];
+  openPorts: OpenPort[];
   injectionFindings: InjectionFinding[];
   corsFindings: CorsFinding[];
   openRedirectFindings: OpenRedirectFinding[];
@@ -133,71 +150,51 @@ function generateVulnerabilities(data: {
   return vulns;
 }
 
-const RECON_PROGRESS = [
-  { phase: 0, progress: 30, msg: '[RECON] Querying DNS servers...' },
-  { phase: 0, progress: 60, msg: '[RECON] Checking SPF/DMARC/DNSSEC records...' },
-  { phase: 0, progress: 90, msg: '[RECON] Checking CAA records...' },
-  { phase: 1, progress: 30, msg: '[SUBDOMAIN] Enumerating subdomains (100 prefixes)...' },
-  { phase: 1, progress: 60, msg: '[SUBDOMAIN] Querying Certificate Transparency...' },
-  { phase: 1, progress: 80, msg: '[SUBDOMAIN] Resolving discovered hosts...' },
-  { phase: 2, progress: 30, msg: '[HEADERS] Fetching HTTP response headers...' },
-  { phase: 2, progress: 60, msg: '[HEADERS] Analyzing security headers...' },
-  { phase: 2, progress: 90, msg: '[HEADERS] Fingerprinting technologies...' },
-  { phase: 3, progress: 30, msg: '[REDIRECT] Checking HTTP→HTTPS redirect...' },
-  { phase: 3, progress: 80, msg: '[REDIRECT] Tracing redirect chain...' },
-];
-
-const ACTIVE_PROGRESS = [
-  { phase: 4, progress: 20, msg: '[FILES] Checking 22 sensitive file paths...' },
-  { phase: 4, progress: 50, msg: '[FILES] Checking admin panels and backups...' },
-  { phase: 4, progress: 90, msg: '[FILES] Checking config files and logs...' },
-  { phase: 5, progress: 30, msg: '[SSL] Testing HTTPS connection...' },
-  { phase: 5, progress: 60, msg: '[SSL] Analyzing certificate chain...' },
-  { phase: 5, progress: 90, msg: '[SSL] Checking for vulnerabilities...' },
-  { phase: 7, progress: 10, msg: '[SPIDER] Starting active URL crawling (depth 2)...' },
-  { phase: 7, progress: 25, msg: '[SPIDER] Fetching seed pages (12 paths)...' },
-  { phase: 7, progress: 45, msg: '[SPIDER] Following internal links...' },
-  { phase: 7, progress: 60, msg: '[SPIDER] Extracting forms and parameters...' },
-  { phase: 7, progress: 80, msg: '[SPIDER] Crawling deeper (depth 2)...' },
-  { phase: 7, progress: 95, msg: '[SPIDER] Compiling crawl results...' },
-  { phase: 8, progress: 20, msg: '[PORTS] Probing 20 common ports...' },
-  { phase: 8, progress: 50, msg: '[PORTS] Checking database ports...' },
-  { phase: 8, progress: 90, msg: '[PORTS] Analyzing open services...' },
-];
-
-const ATTACK_PROGRESS = [
-  { phase: 9, progress: 10, msg: '[INJECTION] Phase 1: GET parameter fuzzing (20 paths)...' },
-  { phase: 9, progress: 25, msg: '[INJECTION] Testing SQLi payloads (15 variants)...' },
-  { phase: 9, progress: 40, msg: '[INJECTION] Testing XSS reflection (14 payloads)...' },
-  { phase: 9, progress: 50, msg: '[INJECTION] Phase 2: POST form fuzzing (12 endpoints)...' },
-  { phase: 9, progress: 60, msg: '[INJECTION] Phase 2b: Crawled form fuzzing...' },
-  { phase: 9, progress: 70, msg: '[INJECTION] Testing login/search/contact forms...' },
-  { phase: 9, progress: 80, msg: '[INJECTION] Phase 3: Header injection testing...' },
-  { phase: 9, progress: 95, msg: '[INJECTION] Deduplicating & analyzing findings...' },
-  { phase: 10, progress: 20, msg: '[CORS] Testing origin reflection...' },
-  { phase: 10, progress: 50, msg: '[CORS] Testing null origin & subdomain bypass...' },
-  { phase: 10, progress: 80, msg: '[CORS] Checking preflight configuration...' },
-  { phase: 11, progress: 20, msg: '[REDIRECT-VULN] Testing 20 redirect parameters...' },
-  { phase: 11, progress: 50, msg: '[REDIRECT-VULN] Fuzzing auth redirect endpoints...' },
-  { phase: 11, progress: 80, msg: '[REDIRECT-VULN] Checking meta refresh & JS redirects...' },
-];
-
-function startProgressTimer(
-  progressLogs: { phase: number; progress: number; msg: string }[],
-  onLog: (log: string) => void,
-  onPhaseChange: (phase: number, progress: number) => void,
-  intervalMs = 1200,
-): { stop: () => void } {
-  let index = 0;
-  const timer = setInterval(() => {
-    if (index < progressLogs.length) {
-      const p = progressLogs[index];
-      onLog(p.msg);
-      onPhaseChange(p.phase, p.progress);
-      index++;
+function mapRealtimeProgress(
+  phaseGroup: string,
+  overallProgress: number,
+  onPhaseChange: (phase: number, progress: number) => void
+) {
+  if (phaseGroup === 'recon') {
+    if (overallProgress <= 25) {
+      const p = Math.round((overallProgress / 25) * 100);
+      onPhaseChange(0, p);
+    } else if (overallProgress <= 50) {
+      const p = Math.round(((overallProgress - 25) / 25) * 100);
+      onPhaseChange(1, p);
+    } else if (overallProgress <= 75) {
+      const p = Math.round(((overallProgress - 50) / 25) * 100);
+      onPhaseChange(2, p);
+    } else {
+      const p = Math.round(((overallProgress - 75) / 25) * 100);
+      onPhaseChange(3, p);
     }
-  }, intervalMs);
-  return { stop: () => clearInterval(timer) };
+  } else if (phaseGroup === 'active') {
+    if (overallProgress <= 25) {
+      const p = Math.round((overallProgress / 25) * 100);
+      onPhaseChange(4, p);
+    } else if (overallProgress <= 50) {
+      const p = Math.round(((overallProgress - 25) / 25) * 100);
+      onPhaseChange(5, p);
+    } else if (overallProgress <= 75) {
+      const p = Math.round(((overallProgress - 50) / 25) * 100);
+      onPhaseChange(7, p);
+    } else {
+      const p = Math.round(((overallProgress - 75) / 25) * 100);
+      onPhaseChange(8, p);
+    }
+  } else if (phaseGroup === 'attack') {
+    if (overallProgress <= 40) {
+      const p = Math.round((overallProgress / 40) * 100);
+      onPhaseChange(9, p);
+    } else if (overallProgress <= 70) {
+      const p = Math.round(((overallProgress - 40) / 30) * 100);
+      onPhaseChange(10, p);
+    } else {
+      const p = Math.round(((overallProgress - 70) / 30) * 100);
+      onPhaseChange(11, p);
+    }
+  }
 }
 
 export async function performRealScan(
@@ -205,176 +202,314 @@ export async function performRealScan(
   onLog: (log: string) => void,
   onPhaseChange: (phase: number, progress: number) => void
 ): Promise<ScanResult> {
-  onLog(`[INIT] Target: ${target}`);
-  onLog('[INIT] VulnRadar Engine v1.0.0 — DEEP SCAN MODE');
-  onLog('[INIT] Connecting to scan backend...');
-  onLog('[INIT] Scan split into 3 phase groups for maximum depth');
-  onLog('');
+  const loggedMessages = new Set<string>();
+  const safeOnLog = (msg: string) => {
+    if (!msg) return;
+    const trimmed = msg.trim();
+    if (loggedMessages.has(trimmed)) return;
+    loggedMessages.add(trimmed);
+    onLog(msg);
+  };
+
+  safeOnLog(`[INIT] Target: ${target}`);
+  safeOnLog('[INIT] VulnRadar Engine v1.0.0 — DEEP SCAN MODE');
+  safeOnLog('[INIT] Connecting to scan backend...');
+  safeOnLog('[INIT] Scan split into 3 phase groups for maximum depth');
+  safeOnLog('');
 
   const startTime = new Date();
 
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase is not configured at runtime. Scanning requires Supabase Functions.');
+  }
+
+  // Generate unique scanId for client/server connection
+  const scanId = 'scan_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+  let isConnected = true;
+
+  // Subscribe to dedicated realtime channel
+  const channel = supabase.channel(`scan:${scanId}`, {
+    config: {
+      broadcast: { self: true },
+    },
+  });
+
+  channel
+    .on('broadcast', { event: 'progress' }, ({ payload }) => {
+      if (payload) {
+        const { message, progress, phase } = payload;
+        if (message) safeOnLog(message);
+        if (progress !== undefined && phase) {
+          mapRealtimeProgress(phase, progress, onPhaseChange);
+        }
+      }
+    });
+
+  // Helper to wait for the channel subscription status
+  const waitForSubscription = (timeoutMs = 5000): Promise<boolean> => {
+    return new Promise((resolve) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          resolve(false);
+        }
+      }, timeoutMs);
+
+      channel.subscribe((status: string) => {
+        console.log(`Frontend channel status for ${scanId}:`, status);
+        if (status === 'SUBSCRIBED' && !resolved) {
+          clearTimeout(timer);
+          resolved = true;
+          resolve(true);
+        } else if ((status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && !resolved) {
+          clearTimeout(timer);
+          resolved = true;
+          resolve(false);
+        }
+
+        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          if (isConnected) {
+            isConnected = false;
+            safeOnLog('[SYSTEM] Realtime channel disconnected. Streaming is paused; falling back to buffered phase logs.');
+          }
+        }
+      });
+    });
+  };
+
+  // Helper to wrap promise with client-side timeout
+  const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, errorMsg: string): Promise<T> => {
+    return Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
+      ),
+    ]);
+  };
+
+  const hasSubscribed = await waitForSubscription();
+  if (hasSubscribed) {
+    safeOnLog('[SYSTEM] Realtime channel established. Streaming backend progress...');
+  } else {
+    isConnected = false;
+    safeOnLog('[SYSTEM] Realtime channel failed to connect. Falling back to buffered logs.');
+  }
+
   // Accumulated results across phases
-  let dnsRecords: any[] = [];
+  let dnsRecords: DNSRecord[] = [];
   let subdomains: string[] = [];
-  let headers: any[] = [];
-  let technologies: any[] = [];
-  let redirectChain: any[] = [];
-  let sensitiveFiles: any[] = [];
-  let sslInfo = { grade: 'N/A', expiry: 'N/A', protocol: 'N/A', cipher: 'N/A', issues: [] as string[] };
-  let openPorts: any[] = [];
+  let headers: SecurityHeader[] = [];
+  let technologies: Technology[] = [];
+  let redirectChain: RedirectChainEntry[] = [];
+  let sensitiveFiles: ExposedFile[] = [];
+  let sslInfo: SSLInfo = { grade: 'N/A', expiry: 'N/A', protocol: 'N/A', cipher: 'N/A', issues: [] };
+  let openPorts: OpenPort[] = [];
   let crawlStats = { pagesDiscovered: 0, paramsFound: 0, formsFound: 0 };
-  let crawlData: any = null;
+  let crawlData: CrawlData | null = null;
   let injectionFindings: InjectionFinding[] = [];
   let corsFindings: CorsFinding[] = [];
   let openRedirectFindings: OpenRedirectFinding[] = [];
 
-  // ═══ PHASE 1: RECON ═══
-  onLog('═══════════════════════════════════════');
-  onLog('[PHASE GROUP 1/3] Reconnaissance');
-  onLog('═══════════════════════════════════════');
-  onPhaseChange(0, 10);
-
-  const reconTimer = startProgressTimer(RECON_PROGRESS, onLog, onPhaseChange);
   try {
-    const supabase = getSupabase();
-    if (!supabase) {
-      const errMsg = 'Supabase is not configured. Scanning requires Supabase Functions.';
-      reconTimer.stop();
-      onLog(`[ERROR] ${errMsg}`);
-      throw new Error(errMsg);
+    // ═══ PHASE 1: RECON ═══
+    safeOnLog('═══════════════════════════════════════');
+    safeOnLog('[PHASE GROUP 1/3] Reconnaissance');
+    safeOnLog('═══════════════════════════════════════');
+    onPhaseChange(0, 10);
+
+    try {
+      const { data, error } = await withTimeout(
+        supabase.functions.invoke<ScanResponse>('scan-target', {
+          body: { target, phase: 'recon', scanId },
+        }),
+        60000,
+        'Reconnaissance phase timed out'
+      );
+
+      if (error) throw new Error(error.message || 'Recon phase failed');
+      if (!data || !data.success) {
+        throw new Error((data as any)?.error || 'Recon phase unsuccessful');
+      }
+
+      if (data.phase !== 'recon') {
+        throw new Error('Mismatched phase response');
+      }
+
+      const r: ReconData = data.data;
+      if (r.logs) {
+        for (const log of r.logs) {
+          if (log != null) safeOnLog(log);
+        }
+      }
+
+      dnsRecords = r.dnsRecords || [];
+      subdomains = r.subdomains || [];
+      headers = r.headers || [];
+      technologies = r.technologies || [];
+      redirectChain = r.redirectChain || [];
+
+      // Force UI updates to 100% complete for all recon sub-phases upon phase resolution
+      onPhaseChange(0, 100);
+      onPhaseChange(1, 100);
+      onPhaseChange(2, 100);
+      onPhaseChange(3, 100);
+
+      safeOnLog('');
+      safeOnLog(`[RECON] ✓ Phase 1 complete: ${dnsRecords.length} DNS records, ${subdomains.length} subdomains, ${headers.length} headers`);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
+      safeOnLog(`[ERROR] Recon phase failed: ${errMsg}`);
+      throw err;
     }
 
-    const { data, error } = await supabase.functions.invoke('scan-target', {
-      body: { target, phase: 'recon' },
-    });
-    reconTimer.stop();
+    // ═══ PHASE 2: ACTIVE ═══
+    safeOnLog('');
+    safeOnLog('═══════════════════════════════════════');
+    safeOnLog('[PHASE GROUP 2/3] Active Scanning');
+    safeOnLog('═══════════════════════════════════════');
+    onPhaseChange(4, 10);
 
-    if (error) throw new Error(error.message || 'Recon phase failed');
-    if (!data?.success) throw new Error(data?.error || 'Recon phase unsuccessful');
+    try {
+      const { data, error } = await withTimeout(
+        supabase.functions.invoke<ScanResponse>('scan-target', {
+          body: { target, phase: 'active', scanId },
+        }),
+        60000,
+        'Active scanning phase timed out'
+      );
 
-    const r = data.data;
-    if (r.logs) for (const log of r.logs) { if (log != null) onLog(log); }
+      if (error) throw new Error(error.message || 'Active phase failed');
+      if (!data || !data.success) {
+        throw new Error((data as any)?.error || 'Active phase unsuccessful');
+      }
 
-    dnsRecords = r.dnsRecords || [];
-    subdomains = r.subdomains || [];
-    headers = r.headers || [];
-    technologies = r.technologies || [];
-    redirectChain = r.redirectChain || [];
+      if (data.phase !== 'active') {
+        throw new Error('Mismatched phase response');
+      }
 
-    onLog('');
-    onLog(`[RECON] ✓ Phase 1 complete: ${dnsRecords.length} DNS records, ${subdomains.length} subdomains, ${headers.length} headers`);
-  } catch (err) {
-    reconTimer.stop();
-    const errMsg = err instanceof Error ? err.message : 'Unknown error';
-    onLog(`[ERROR] Recon phase failed: ${errMsg}`);
-    throw err;
+      const r: ActiveData = data.data;
+      if (r.logs) {
+        for (const log of r.logs) {
+          if (log != null) safeOnLog(log);
+        }
+      }
+
+      sensitiveFiles = r.sensitiveFiles || [];
+      sslInfo = r.sslInfo || sslInfo;
+      openPorts = r.openPorts || [];
+      crawlStats = r.crawlStats || crawlStats;
+      crawlData = r.crawlData || null;
+
+      // Force UI updates to 100% complete for all active sub-phases upon phase resolution
+      onPhaseChange(4, 100);
+      onPhaseChange(5, 100);
+      onPhaseChange(7, 100);
+      onPhaseChange(8, 100);
+
+      safeOnLog('');
+      safeOnLog(`[ACTIVE] ✓ Phase 2 complete: ${sensitiveFiles.length} exposed files, SSL ${sslInfo.grade}, ${openPorts.length} ports, ${crawlStats.pagesDiscovered} pages crawled`);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
+      safeOnLog(`[ERROR] Active phase failed: ${errMsg}`);
+      throw err;
+    }
+
+    // ═══ PHASE 3: ATTACK ═══
+    safeOnLog('');
+    safeOnLog('═══════════════════════════════════════');
+    safeOnLog('[PHASE GROUP 3/3] Attack Surface Testing');
+    safeOnLog('═══════════════════════════════════════');
+    onPhaseChange(9, 10);
+
+    try {
+      const { data, error } = await withTimeout(
+        supabase.functions.invoke<ScanResponse>('scan-target', {
+          body: { target, phase: 'attack', crawlData, scanId },
+        }),
+        90000,
+        'Attack testing phase timed out'
+      );
+
+      if (error) throw new Error(error.message || 'Attack phase failed');
+      if (!data || !data.success) {
+        throw new Error((data as any)?.error || 'Attack phase unsuccessful');
+      }
+
+      if (data.phase !== 'attack') {
+        throw new Error('Mismatched phase response');
+      }
+
+      const r: AttackData = data.data;
+      if (r.logs) {
+        for (const log of r.logs) {
+          if (log != null) safeOnLog(log);
+        }
+      }
+
+      injectionFindings = r.injectionFindings || [];
+      corsFindings = r.corsFindings || [];
+      openRedirectFindings = r.openRedirectFindings || [];
+
+      // Force UI updates to 100% complete for all attack sub-phases upon phase resolution
+      onPhaseChange(9, 100);
+      onPhaseChange(10, 100);
+      onPhaseChange(11, 100);
+
+      safeOnLog('');
+      safeOnLog(`[ATTACK] ✓ Phase 3 complete: ${injectionFindings.length} injection, ${corsFindings.length} CORS, ${openRedirectFindings.length} redirect findings`);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
+      safeOnLog(`[ERROR] Attack phase failed: ${errMsg}`);
+      throw err;
+    }
+
+    // ═══ REPORT GENERATION ═══
+    onPhaseChange(12, 50);
+    safeOnLog('');
+    safeOnLog('═══════════════════════════════════════');
+    safeOnLog('[REPORT] Compiling final report...');
+    safeOnLog('═══════════════════════════════════════');
+
+    const vulnerabilities = generateVulnerabilities({
+      headers, dnsRecords, sslInfo, sensitiveFiles, redirectChain,
+      openPorts, injectionFindings, corsFindings, openRedirectFindings,
+    }, target);
+
+    safeOnLog(`[REPORT] Found ${vulnerabilities.length} vulnerabilities`);
+    safeOnLog(`[REPORT] ${headers.length} headers, ${dnsRecords.length} DNS, ${subdomains.length} subdomains`);
+    safeOnLog(`[REPORT] ${openPorts.length} ports, ${sensitiveFiles.length} files, SSL: ${sslInfo.grade}`);
+    safeOnLog(`[REPORT] Crawled: ${crawlStats.pagesDiscovered} pages, ${crawlStats.paramsFound} params, ${crawlStats.formsFound} forms`);
+    safeOnLog(`[REPORT] Injection: ${injectionFindings.length}, CORS: ${corsFindings.length}, Redirect: ${openRedirectFindings.length}`);
+
+    onPhaseChange(12, 100);
+    safeOnLog('[REPORT] Report generation complete.');
+
+    return {
+      target,
+      startTime,
+      endTime: new Date(),
+      vulnerabilities,
+      openPorts,
+      headers,
+      sslInfo: { ...sslInfo, expiry: sslInfo.expiry || 'N/A', protocol: sslInfo.protocol || 'N/A', cipher: sslInfo.cipher || 'N/A' },
+      technologies,
+      dnsRecords,
+      subdomains,
+      sensitiveFiles,
+      redirectChain,
+      injectionFindings,
+      corsFindings,
+      openRedirectFindings,
+      crawlStats,
+    };
+  } finally {
+    try {
+      supabase.removeChannel(channel);
+    } catch (err) {
+      console.error('Error removing channel:', err);
+    }
   }
-
-  // ═══ PHASE 2: ACTIVE ═══
-  onLog('');
-  onLog('═══════════════════════════════════════');
-  onLog('[PHASE GROUP 2/3] Active Scanning');
-  onLog('═══════════════════════════════════════');
-  onPhaseChange(4, 10);
-
-  const activeTimer = startProgressTimer(ACTIVE_PROGRESS, onLog, onPhaseChange);
-  try {
-    const { data, error } = await supabase.functions.invoke('scan-target', {
-      body: { target, phase: 'active' },
-    });
-    activeTimer.stop();
-
-    if (error) throw new Error(error.message || 'Active phase failed');
-    if (!data?.success) throw new Error(data?.error || 'Active phase unsuccessful');
-
-    const r = data.data;
-    if (r.logs) for (const log of r.logs) { if (log != null) onLog(log); }
-
-    sensitiveFiles = r.sensitiveFiles || [];
-    sslInfo = r.sslInfo || sslInfo;
-    openPorts = r.openPorts || [];
-    crawlStats = r.crawlStats || crawlStats;
-    crawlData = r.crawlData || null;
-
-    onLog('');
-    onLog(`[ACTIVE] ✓ Phase 2 complete: ${sensitiveFiles.length} exposed files, SSL ${sslInfo.grade}, ${openPorts.length} ports, ${crawlStats.pagesDiscovered} pages crawled`);
-  } catch (err) {
-    activeTimer.stop();
-    const errMsg = err instanceof Error ? err.message : 'Unknown error';
-    onLog(`[ERROR] Active phase failed: ${errMsg}`);
-    throw err;
-  }
-
-  // ═══ PHASE 3: ATTACK ═══
-  onLog('');
-  onLog('═══════════════════════════════════════');
-  onLog('[PHASE GROUP 3/3] Attack Surface Testing');
-  onLog('═══════════════════════════════════════');
-  onPhaseChange(9, 10);
-
-  const attackTimer = startProgressTimer(ATTACK_PROGRESS, onLog, onPhaseChange);
-  try {
-    const { data, error } = await supabase.functions.invoke('scan-target', {
-      body: { target, phase: 'attack', crawlData },
-    });
-    attackTimer.stop();
-
-    if (error) throw new Error(error.message || 'Attack phase failed');
-    if (!data?.success) throw new Error(data?.error || 'Attack phase unsuccessful');
-
-    const r = data.data;
-    if (r.logs) for (const log of r.logs) { if (log != null) onLog(log); }
-
-    injectionFindings = r.injectionFindings || [];
-    corsFindings = r.corsFindings || [];
-    openRedirectFindings = r.openRedirectFindings || [];
-
-    onLog('');
-    onLog(`[ATTACK] ✓ Phase 3 complete: ${injectionFindings.length} injection, ${corsFindings.length} CORS, ${openRedirectFindings.length} redirect findings`);
-  } catch (err) {
-    attackTimer.stop();
-    const errMsg = err instanceof Error ? err.message : 'Unknown error';
-    onLog(`[ERROR] Attack phase failed: ${errMsg}`);
-    throw err;
-  }
-
-  // ═══ REPORT GENERATION ═══
-  onPhaseChange(12, 50);
-  onLog('');
-  onLog('═══════════════════════════════════════');
-  onLog('[REPORT] Compiling final report...');
-  onLog('═══════════════════════════════════════');
-
-  const vulnerabilities = generateVulnerabilities({
-    headers, dnsRecords, sslInfo, sensitiveFiles, redirectChain,
-    openPorts, injectionFindings, corsFindings, openRedirectFindings,
-  }, target);
-
-  onLog(`[REPORT] Found ${vulnerabilities.length} vulnerabilities`);
-  onLog(`[REPORT] ${headers.length} headers, ${dnsRecords.length} DNS, ${subdomains.length} subdomains`);
-  onLog(`[REPORT] ${openPorts.length} ports, ${sensitiveFiles.length} files, SSL: ${sslInfo.grade}`);
-  onLog(`[REPORT] Crawled: ${crawlStats.pagesDiscovered} pages, ${crawlStats.paramsFound} params, ${crawlStats.formsFound} forms`);
-  onLog(`[REPORT] Injection: ${injectionFindings.length}, CORS: ${corsFindings.length}, Redirect: ${openRedirectFindings.length}`);
-
-  onPhaseChange(12, 100);
-  onLog('[REPORT] Report generation complete.');
-
-  return {
-    target,
-    startTime,
-    endTime: new Date(),
-    vulnerabilities,
-    openPorts,
-    headers,
-    sslInfo: { ...sslInfo, expiry: sslInfo.expiry || 'N/A', protocol: sslInfo.protocol || 'N/A', cipher: sslInfo.cipher || 'N/A' },
-    technologies,
-    dnsRecords,
-    subdomains,
-    sensitiveFiles,
-    redirectChain,
-    injectionFindings,
-    corsFindings,
-    openRedirectFindings,
-    crawlStats,
-  };
 }
