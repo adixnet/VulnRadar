@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/client';
 import type { ScanResult, Vulnerability, InjectionFinding, CorsFinding, OpenRedirectFinding } from '@/lib/scanner-data';
 
 // Client-side vulnerability generation from merged phase data
@@ -236,6 +236,14 @@ export async function performRealScan(
 
   const reconTimer = startProgressTimer(RECON_PROGRESS, onLog, onPhaseChange);
   try {
+    const supabase = getSupabase();
+    if (!supabase) {
+      const errMsg = 'Supabase is not configured. Scanning requires Supabase Functions.';
+      reconTimer.stop();
+      onLog(`[ERROR] ${errMsg}`);
+      throw new Error(errMsg);
+    }
+
     const { data, error } = await supabase.functions.invoke('scan-target', {
       body: { target, phase: 'recon' },
     });

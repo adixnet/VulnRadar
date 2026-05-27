@@ -1,5 +1,5 @@
 import type { ScanResult } from './scanner-data';
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/client';
 
 export interface StoredScan {
   id: string;
@@ -19,20 +19,26 @@ export async function saveScan(result: ScanResult): Promise<StoredScan> {
   };
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase.from as any)('scan_history').insert([
-      {
-        id: entry.id,
-        target: result.target,
-        result: entry.result,
-        timestamp: entry.timestamp,
-      }
-    ]);
-    
-    if (error) {
-      console.error('Failed to save to Supabase:', error);
-      // Fallback to local storage if DB is not configured yet
+    const supabase = getSupabase();
+    if (!supabase) {
+      // Supabase not configured: use local storage fallback
       saveToLocalStorage(entry);
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.from as any)('scan_history').insert([
+        {
+          id: entry.id,
+          target: result.target,
+          result: entry.result,
+          timestamp: entry.timestamp,
+        }
+      ]);
+
+      if (error) {
+        console.error('Failed to save to Supabase:', error);
+        // Fallback to local storage if DB is not configured yet
+        saveToLocalStorage(entry);
+      }
     }
   } catch (err) {
     console.error('Error saving scan:', err);
@@ -44,6 +50,9 @@ export async function saveScan(result: ScanResult): Promise<StoredScan> {
 
 export async function getHistory(): Promise<StoredScan[]> {
   try {
+    const supabase = getSupabase();
+    if (!supabase) return getFromLocalStorage();
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.from as any)('scan_history')
       .select('*')
@@ -95,14 +104,18 @@ export async function getHistory(): Promise<StoredScan[]> {
 
 export async function clearHistory(): Promise<void> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase.from as any)('scan_history')
-      .delete()
-      .neq('id', '0'); // Delete all rows
-      
-    if (error) {
-      console.error('Failed to clear history from Supabase:', error);
+    const supabase = getSupabase();
+    if (supabase) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.from as any)('scan_history')
+        .delete()
+        .neq('id', '0'); // Delete all rows
+
+      if (error) {
+        console.error('Failed to clear history from Supabase:', error);
+      }
     }
+
     // Always clear fallback too
     localStorage.removeItem('vulnradar_history');
   } catch (err) {

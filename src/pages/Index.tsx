@@ -81,7 +81,6 @@ const Index = () => {
       setCompareScans([null, null]);
     } catch (err) {
       setHistory([]);
-      setShowHistory(true);
       setCompareMode(false);
       setCompareScans([null, null]);
       toast({

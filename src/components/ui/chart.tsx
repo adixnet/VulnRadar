@@ -7,7 +7,22 @@ import { cn } from "@/lib/utils";
 const THEMES = { light: "", dark: ".dark" } as const;
 
 function escapeCssIdentifier(value?: string) {
-  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  const rawValue = String(value ?? '');
+
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(rawValue);
+  }
+
+  return Array.from(rawValue)
+    .map((character) => {
+      if (/^[a-zA-Z0-9_-]$/.test(character)) {
+        return character;
+      }
+
+      const codePoint = character.codePointAt(0);
+      return codePoint === undefined ? '_' : `_${codePoint.toString(16)}_`;
+    })
+    .join('');
 }
 
 export type ChartConfig = {

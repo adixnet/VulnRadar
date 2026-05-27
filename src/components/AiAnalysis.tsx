@@ -2,7 +2,7 @@ import { useState } from 'react';
 import DOMPurify from 'dompurify';
 import { Brain, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/client';
 import type { ScanResult } from '@/lib/scanner-data';
 
 interface AiAnalysisProps {
@@ -18,6 +18,9 @@ const AiAnalysis = ({ result }: AiAnalysisProps) => {
     setLoading(true);
     setError(null);
     try {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase is not configured. AI analysis requires Supabase Functions.');
+
       const { data, error: fnError } = await supabase.functions.invoke('ai-analyze', {
         body: { scanResult: result },
       });

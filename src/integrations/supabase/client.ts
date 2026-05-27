@@ -5,21 +5,46 @@ import type { Database } from './types';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-// Provide a clearer development-time message when env vars are missing.
-if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-  // Throwing here makes the problem visible early with guidance.
-  throw new Error(
-    'Supabase environment variables are missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in a .env file (see .env.example).'
-  );
+// Lazy/nullable Supabase client
+let _client: ReturnType<typeof createClient<Database>> | null | undefined;
+
+function createSupabase() {
+  const storage = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined' ? window.localStorage : undefined;
+  return createClient<Database>(SUPABASE_URL as string, SUPABASE_PUBLISHABLE_KEY as string, {
+    auth: {
+      // Only set storage when available (avoids Node/test runtime errors)
+      storage: storage as any,
+      persistSession: true,
+      autoRefreshToken: true,
+    },
+  });
 }
 
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
-
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    storage: localStorage,
-    persistSession: true,
-    autoRefreshToken: true,
+/**
+ * Returns a Supabase client if the required env vars are configured, otherwise null.
+ * This function lazy-initializes the client to avoid throwing at module-import time
+ * (which can crash tests or prevent fallback logic from running).
+ */
+export function getSupabase() {
+  if (_client === undefined) {
+    if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+      _client = null;
+    } else {
+      _client = createSupabase();
+    }
   }
-});
+  return _client;
+}
+
+/**
+ * Convenience that throws with a clear message when Supabase is required.
+ */
+export function requireSupabase() {
+  const c = getSupabase();
+  if (!c) {
+    throw new Error(
+      'Supabase is not configured at runtime. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in a .env file (see .env.example) or disable Supabase features.'
+    );
+  }
+  return c;
+}
