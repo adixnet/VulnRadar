@@ -1026,9 +1026,13 @@ function extractLinks(html: string, baseUrl: string, domain: string): string[] {
       if (href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:') || href.startsWith('data:')) continue;
       if (href.startsWith('/')) href = `${baseUrl}${href}`;
       else if (!href.startsWith('http')) href = `${baseUrl}/${href}`;
-      const urlObj = new URL(href);
-      if (urlObj.hostname === domain || urlObj.hostname.endsWith(`.${domain}`)) {
-        links.add(`${urlObj.origin}${urlObj.pathname}${urlObj.search}`);
+      try {
+        const urlObj = new URL(href);
+        if (urlObj.hostname === domain || urlObj.hostname.endsWith(`.${domain}`)) {
+          links.add(`${urlObj.origin}${urlObj.pathname}${urlObj.search}`);
+        }
+      } catch {
+        continue;
       }
     }
   } catch { /* invalid html or URL */ }
