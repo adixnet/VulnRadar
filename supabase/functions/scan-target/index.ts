@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.8';
-import { DOMParser } from 'https://esm.sh/linkedom@0.18.12';
+import { DOMParser } from "https://esm.sh/linkedom@0.18.12";
 import { ScanRequest } from './types/scan.ts';
 
 const corsHeaders = {
