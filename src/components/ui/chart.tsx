@@ -6,6 +6,25 @@ import { cn } from "@/lib/utils";
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
 
+function escapeCssIdentifier(value?: string) {
+  const rawValue = String(value ?? '');
+
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(rawValue);
+  }
+
+  return Array.from(rawValue)
+    .map((character) => {
+      if (/^[a-zA-Z0-9_-]$/.test(character)) {
+        return character;
+      }
+
+      const codePoint = character.codePointAt(0);
+      return codePoint === undefined ? '_' : `_${codePoint.toString(16)}_`;
+    })
+    .join('');
+}
+
 export type ChartConfig = {
   [k in string]: {
     label?: React.ReactNode;
@@ -37,12 +56,13 @@ const ChartContainer = React.forwardRef<
   }
 >(({ id, className, children, config, ...props }, ref) => {
   const uniqueId = React.useId();
-  const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
+  const rawId = id || uniqueId.replace(/:/g, "");
+  const safeChartId = `chart-${escapeCssIdentifier(String(rawId))}`;
 
   return (
     <ChartContext.Provider value={{ config }}>
       <div
-        data-chart={chartId}
+        data-chart={safeChartId}
         ref={ref}
         className={cn(
           "flex aspect-video justify-center text-xs [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-none [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-sector]:outline-none [&_.recharts-surface]:outline-none",
@@ -50,7 +70,7 @@ const ChartContainer = React.forwardRef<
         )}
         {...props}
       >
-        <ChartStyle id={chartId} config={config} />
+        <ChartStyle id={safeChartId} config={config} />
         <RechartsPrimitive.ResponsiveContainer>{children}</RechartsPrimitive.ResponsiveContainer>
       </div>
     </ChartContext.Provider>
@@ -65,23 +85,37 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
+  // Render safe CSS with validated colors and escaped identifiers
   return (
     <style
       dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
-  })
-  .join("\n")}
-}
-`,
-          )
-          .join("\n"),
+        __html: (() => {
+          function isValidColor(value?: string) {
+            if (!value || typeof value !== 'string') return false;
+            const hex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+            const rgb = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(0|1|0?\.\d+))?\s*\)$/i;
+            const cssVar = /^var\(--[a-z0-9\-]+\)$/i;
+            const named = /^[a-z]+$/i;
+            return hex.test(value) || rgb.test(value) || cssVar.test(value) || named.test(value);
+          }
+
+          return Object.entries(THEMES)
+            .map(([theme, prefix]) => {
+              const body = colorConfig
+                .map(([key, itemConfig]) => {
+                  const rawColor = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
+                  const color = isValidColor(rawColor) ? rawColor : null;
+                  const safeKey = escapeCssIdentifier(key);
+                  return color ? `  --color-${safeKey}: ${color};` : null;
+                })
+                .filter(Boolean)
+                .join('\n');
+
+              const safeId = escapeCssIdentifier(id);
+              return `${prefix} [data-chart="${safeId}"] {\n${body}\n}`;
+            })
+            .join('\n');
+        })(),
       }}
     />
   );

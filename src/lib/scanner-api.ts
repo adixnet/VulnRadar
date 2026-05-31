@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/client';
 import type { ScanResult, Vulnerability } from '@/lib/scanner-data';
 import type {
   CrawlData,
@@ -218,6 +218,11 @@ export async function performRealScan(
   safeOnLog('');
 
   const startTime = new Date();
+
+  const supabase = getSupabase();
+  if (!supabase) {
+    throw new Error('Supabase is not configured at runtime. Scanning requires Supabase Functions.');
+  }
 
   // Generate unique scanId for client/server connection
   const scanId = 'scan_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
