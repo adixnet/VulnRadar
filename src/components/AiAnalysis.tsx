@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import DOMPurify from 'dompurify';
 import { Brain, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/client';
 import type { ScanResult } from '@/lib/scanner-data';
 
 interface AiAnalysisProps {
@@ -17,6 +18,9 @@ const AiAnalysis = ({ result }: AiAnalysisProps) => {
     setLoading(true);
     setError(null);
     try {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('Supabase is not configured. AI analysis requires Supabase Functions.');
+
       const { data, error: fnError } = await supabase.functions.invoke('ai-analyze', {
         body: { scanResult: result },
       });
@@ -85,7 +89,12 @@ const AiAnalysis = ({ result }: AiAnalysisProps) => {
         [&_ol]:space-y-1 [&_ul]:space-y-1
         [&_code]:text-primary [&_code]:bg-primary/10 [&_code]:px-1 [&_code]:rounded [&_code]:text-xs
       ">
-        <div dangerouslySetInnerHTML={{ __html: markdownToHtml(analysis || '') }} />
+        {/* Sanitize AI-generated HTML to mitigate XSS */}
+        <div
+          dangerouslySetInnerHTML={{
+            __html: DOMPurify.sanitize(markdownToHtml(analysis || '')),
+          }}
+        />
       </div>
     </div>
   );
