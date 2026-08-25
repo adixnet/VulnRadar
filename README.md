@@ -158,8 +158,12 @@ supabase/functions/
 **VulnRadar is intended for authorized security testing only.** Always obtain proper authorization before scanning any target. Unauthorized scanning of systems you do not own or have permission to test is illegal and unethical. The authors are not responsible for any misuse of this tool.
 
 ## 📄 License
-
-This project is open source and available under the [MIT License](LICENSE).
+<a href="LICENSE">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License">
+</a>
+<a href="PATENTS">
+  <img src="https://img.shields.io/badge/patent-license-green.svg" alt="Patent License">
+</a>
 
 ---
 
